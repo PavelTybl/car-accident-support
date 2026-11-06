@@ -147,24 +147,31 @@
         '<h2>Is everyone all right?</h2>' +
         '<p class="intro">Your safety comes first. Please confirm that you and everyone else at the scene are unhurt.</p>' +
         '<div class="stack">' +
-        '<a class="opt" href="#safety">' + I.check + '<div class="txt"><b>Yes, everyone is all right.</b><span>Start the accident report assistant.</span></div>' + I.right + '</a>' +
-        '<a class="opt danger" href="tel:112">' + I.alert + '<div class="txt"><b>No, emergency!</b><span>We will help you call help</span></div>' + I.right + '</a>' +
+        '<div class="opt start"><div class="txt"><b>Yes, everyone is all right.</b><span>Start the accident report assistant.</span></div>' +
+        '<a class="btn on" href="#safety">Start the form</a></div>' +
+        '<a class="opt danger" href="tel:112">' + I.alert + '<div class="txt"><b>No, emergency!</b><span>Call police and ambulance now</span></div>' + I.right + '</a>' +
         '</div>'
     };
   }
 
-  function checklist(key, title, intro, items, next) {
+  function checklist(key, title, intro, items, next, warn) {
     return {
       bar: { title: title, back: true }, next: next, gated: true,
       html:
         '<p class="intro">' + intro + '</p><div class="stack">' +
         items.map(function (it, i) {
-          return '<button class="opt" role="checkbox" aria-checked="false">' +
-            I.empty + '<div class="txt"><b>' + it[0] + '</b><span>' + it[1] + '</span></div></button>';
+          return '<button class="opt chk" role="checkbox" aria-checked="false">' +
+            I.empty + '<div class="txt">' + (it[2] ? '<img class="ci" alt="" src="assets/icons/' + it[2] + '.svg">' : '') + '<b>' + it[0] + '</b><span>' + it[1] + '</span></div></button>';
         }).join('') + '</div>',
       init: function (root, btn) {
         var boxes = root.querySelectorAll('[role=checkbox]');
         var saved = state[key] || [];
+        var note = null;
+        if (warn) {
+          note = document.createElement('div'); note.className = 'note'; note.setAttribute('role', 'status');
+          note.innerHTML = I.info + '<p>' + warn + '</p>';
+          btn.parentNode.insertBefore(note, btn);
+        }
         function paint() {
           var all = true;
           boxes.forEach(function (b, i) {
@@ -176,6 +183,7 @@
           });
           btn.classList.toggle('on', all);
           btn.disabled = !all;
+          if (note) note.hidden = all;
         }
         boxes.forEach(function (b, i) {
           b.addEventListener('click', function () { saved[i] = !saved[i]; state[key] = saved; save(); paint(); });
@@ -289,7 +297,28 @@
         }
         function select(k) { sk.sel = k; place(); save(); }
         root.querySelectorAll('.seg button').forEach(function (b) { b.addEventListener('click', function () { select(b.dataset.k); }); });
-        root.querySelector('#add').addEventListener('click', function () { toast('Not available in this prototype'); });
+        (function () {
+          var addBtn = root.querySelector('#add'), row = addBtn.parentNode, menu = null;
+          var ic = function (p) { return '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' + p + '</svg>'; };
+          var items = [
+            ['Draw line', ic('<path d="M4 19L19 4"/><circle cx="4" cy="19" r="1.6"/><circle cx="19" cy="4" r="1.6"/>')],
+            ['Draw shape', ic('<rect x="3.5" y="3.5" width="9" height="9" rx="1.5"/><circle cx="16" cy="16" r="5"/>')],
+            ['Add icon', ic('<path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.100L12 17l-5.400 2.900 1-6.100L3.200 9.500l6.100-.9z"/>')],
+            ['Free-hand', ic('<path d="M3 17c3-8 5-9 6-6s2 5 4 2 3-8 8-5"/>')]
+          ];
+          function close() { if (menu) { menu.remove(); menu = null; addBtn.setAttribute('aria-expanded', 'false'); document.removeEventListener('click', outside, true); } }
+          function outside(e) { if (menu && !menu.contains(e.target) && !addBtn.contains(e.target)) close(); }
+          addBtn.setAttribute('aria-haspopup', 'menu'); addBtn.setAttribute('aria-expanded', 'false');
+          addBtn.addEventListener('click', function () {
+            if (menu) { close(); return; }
+            menu = document.createElement('div'); menu.className = 'menu'; menu.setAttribute('role', 'menu');
+            menu.innerHTML = items.map(function (it) { return '<button role="menuitem" type="button">' + it[1] + '<span>' + it[0] + '</span></button>'; }).join('');
+            menu.addEventListener('click', function (e) { if (e.target.closest('button')) close(); });
+            row.appendChild(menu); addBtn.setAttribute('aria-expanded', 'true');
+            document.addEventListener('click', outside, true);
+          });
+          var pc = cleanup; cleanup = function () { document.removeEventListener('click', outside, true); if (pc) pc(); };
+        })();
         root.querySelector('#edit').addEventListener('click', function () { toast('Not available in this prototype'); });
 
         var drag = null;
@@ -332,10 +361,12 @@
     };
   }
 
+  var MAX_WITNESSES = 1;   // only one witness for now (raise to allow more)
+  var MOCK_WITNESS = { name: 'Petra Svobodová', contact: '+420 777 456 321' };   // pre-filled when "Add a witness" is pressed
+
   function detailsScreen() {
-    var d = state.details || (state.details = { text: '', vehicles: '1', damage: DEFAULT_DAMAGE, witnesses: [] });
+    var d = state.details || (state.details = { text: '', vehicles: '1', damage: '', witnesses: [] });
     var vehicles = ['1', '2', '3', '4', '5 or more'];
-    var damage = Object.keys(DAMAGE_ANGLES);
     function opts(list, cur) { return list.map(function (o) { return '<option' + (o === cur ? ' selected' : '') + '>' + o + '</option>'; }).join(''); }
     return {
       bar: { title: 'Accident details', back: true, step: 2 }, next: 'photos', cta: 'Next',
@@ -343,9 +374,16 @@
         '<p class="intro">Fill in the details of your accident:</p>' +
         '<div class="card form">' +
           '<textarea class="ta" id="txt" placeholder="Describe the accident"></textarea>' +
-          '<label class="sel"><span>How many other vehicles?</span><select id="veh">' + opts(vehicles, d.vehicles) + '</select></label>' +
-          '<label class="sel"><span>Type of damage</span><select id="dmg">' + opts(damage, d.damage) + '</select></label>' +
         '</div>' +
+        '<div class="card form vehq">' +
+          '<label class="sel"><span>How many other vehicles?</span><select id="veh">' + opts(vehicles, d.vehicles) + '</select></label>' +
+        '</div>' +
+        '<div class="card dmgmap"><p>Tap on the area damaged in the accident</p>' +
+          '<svg id="car" viewBox="0 0 220 123" fill="none" role="group" aria-label="Damaged area of the vehicle">' +
+            '<defs><clipPath id="carclip"><path d="M215.887 61.9813C215.887 61.9813 216.287 72.6483 213.491 84.3084C210.698 95.9684 198.271 97.8231 191.626 99.1523C184.98 100.485 177.851 101.053 168.611 101.328C159.374 101.603 147.586 101.199 142.513 101.224C137.441 101.248 131.611 101.514 114.384 101.74C97.1537 101.966 63.7472 102.015 63.7472 102.015C63.7472 102.015 60.3372 102.504 57.8317 102.63C55.3292 102.755 30.5883 102.568 28.3241 102.379C26.063 102.186 22.4086 101.102 18.583 99.4854C14.7605 97.872 7.42105 87.4922 5.94827 85.3839C4.47549 83.2756 3.62604 80.22 3.00882 76.1255C2.39159 72.0311 2.39159 51.238 3.00882 47.1435C3.62604 43.0491 4.47549 39.9935 5.94827 37.8852C7.42105 35.7768 14.7605 25.4002 18.583 23.7838C22.4086 22.1705 26.063 21.0827 28.3241 20.8932C30.5883 20.7007 55.3292 20.5143 57.8317 20.6396C60.3372 20.7649 63.7472 21.2538 63.7472 21.2538C63.7472 21.2538 97.1537 21.3057 114.384 21.5318C131.611 21.7579 137.441 22.0207 142.513 22.0452C147.586 22.0727 159.374 21.6693 168.611 21.9443C177.851 22.2163 184.98 22.7876 191.626 24.1168C198.271 25.446 210.698 27.3038 213.491 38.9607C216.287 50.6208 215.887 61.2878 215.887 61.2878"/></clipPath></defs>' +
+            '<path d="M72.2267 21.2748C71.8478 21.0181 71.5116 20.4803 71.4566 19.8142C71.3741 18.8364 71.6949 18.2406 72.3641 16.8167C73.0333 15.3897 75.7955 12.7681 77.3691 12.2426C78.9397 11.7139 80.3329 11.888 80.3085 12.5633C80.2841 13.2386 80.3452 14.5128 79.6791 16.3033C79.0099 18.0939 78.0047 20.8898 76.8497 21.0426C76.2539 21.122 75.3311 21.2076 74.503 21.2809C85.7872 21.3145 103.384 21.3879 114.384 21.5315C131.611 21.7576 137.441 22.0203 142.517 22.0478C147.589 22.0722 159.374 21.6689 168.614 21.9439C177.851 22.2189 184.983 22.7873 191.629 24.1164C198.275 25.4486 210.702 27.3034 213.494 38.9634C216.287 50.6235 215.89 61.2874 215.89 61.2874L215.89 61.984C215.89 61.984 216.287 72.6479 213.494 84.308C210.702 95.968 198.275 97.8258 191.629 99.155C184.983 100.484 177.851 101.056 168.614 101.327C159.374 101.602 147.589 101.199 142.517 101.224C137.441 101.251 131.611 101.514 114.384 101.74C103.213 101.887 85.2341 101.96 73.9743 101.994C74.9002 102.073 76.0858 102.177 76.7977 102.272C77.9405 102.424 78.9366 105.193 79.5966 106.965C80.2597 108.74 80.1955 109.999 80.2199 110.668C80.2474 111.338 78.8695 111.509 77.3111 110.986C75.7528 110.464 73.018 107.869 72.355 106.458C71.6919 105.046 71.3772 104.456 71.4566 103.488C71.5147 102.785 71.8875 102.229 72.2908 101.997C67.1269 102.012 63.7474 102.018 63.7474 102.018C63.7474 102.018 60.3374 102.507 57.8349 102.632C55.3293 102.757 30.5885 102.571 28.3274 102.379C26.0663 102.186 22.4088 101.101 18.5863 99.488C14.7638 97.8716 7.42433 87.4949 5.95155 85.3866C4.47572 83.2752 3.62616 80.2196 3.01199 76.1282C2.39477 72.0338 2.39477 51.2407 3.01199 47.1463C3.62616 43.0518 4.47571 39.9962 5.95155 37.8879C7.42433 35.7796 14.7638 25.3998 18.5863 23.7864C22.4088 22.17 26.0663 21.0853 28.3274 20.8928C30.5885 20.7034 55.3293 20.5139 57.8349 20.6423C60.3374 20.7676 63.7474 21.2534 63.7474 21.2534C63.7474 21.2534 67.0994 21.2595 72.2267 21.2748Z" fill-rule="evenodd" clip-rule="evenodd" fill="#2C2C2E"/><path d="M160.286 36.473L195.086 34.5559C195.086 34.5559 200.105 46.0868 200.105 61.939C200.105 77.7882 195.086 89.3662 195.086 89.3662L160.286 87.4491C160.286 87.4491 163.664 76.9365 163.664 61.9611C163.664 46.9857 160.286 36.473 160.286 36.473Z" fill-rule="evenodd" clip-rule="evenodd" fill="#48484A"/><path d="M90.3532 89.98C90.3532 89.98 85.5322 77.9714 85.5322 61.9368C85.5322 45.8991 90.2182 33.9094 90.2182 33.9094L58.7745 26.6338C58.7745 26.6338 47.7715 32.954 47.7715 61.9589C47.7715 90.9669 58.7745 97.287 58.7745 97.287L90.3532 89.98Z" fill-rule="evenodd" clip-rule="evenodd" fill="#48484A"/><path d="M64.3352 20.4285C64.3352 20.4285 93.3212 28.6784 113.655 29.1498C133.989 29.6212 151.127 30.5546 159.455 26.6355C167.786 22.7133 169.44 21.1011 169.44 21.1011L117.757 20.7491L64.3352 20.4285Z" fill-rule="evenodd" clip-rule="evenodd" fill="#48484A"/><path d="M64.3352 104.168C64.3352 104.168 93.3212 95.9178 113.655 95.4464C133.989 94.975 151.127 94.0416 159.455 97.9607C167.786 101.883 169.44 103.495 169.44 103.495L117.757 103.847L64.3352 104.168Z" fill-rule="evenodd" clip-rule="evenodd" fill="#48484A"/><path d="M9.18447 83.0765C8.25253 81.3409 11.5739 79.0247 11.5739 79.0247C11.5739 79.0247 14.113 82.6151 15.5216 84.5645C18.5802 88.7965 24.1904 93.2453 25.7579 94.3973C27.6248 95.7692 30.1732 98.1404 30.1732 98.1404C30.1732 98.1404 24.3676 97.5414 22.0179 96.2764C19.3443 94.8403 16.7286 92.6984 13.9541 89.3556C11.1827 86.0098 9.92392 84.4576 9.18447 83.0765ZM208.722 80.7206C208.914 78.7558 204.96 78.3067 204.96 78.3067C204.96 78.3067 203.992 82.5967 203.439 84.9372C202.268 89.8811 198.95 95.9404 197.844 97.7982C197.813 97.8501 201.926 96.6309 203.818 95.6959C204.942 93.9725 205.935 91.962 206.772 89.2425C208.049 85.0931 208.566 82.2789 208.722 80.7206ZM208.722 42.5353C208.914 44.5 204.96 44.9491 204.96 44.9491C204.96 44.9491 203.992 40.6591 203.439 38.3186C202.268 33.3747 198.95 27.3154 197.844 25.4577C197.813 25.4057 201.926 26.6249 203.818 27.5599C204.942 29.2833 205.935 31.2938 206.772 34.0133C208.049 38.1658 208.566 40.98 208.722 42.5353ZM9.18447 40.8944C8.25253 42.633 11.5739 44.9491 11.5739 44.9491C11.5739 44.9491 14.113 41.3588 15.5216 39.4094C18.5802 35.1774 24.1904 30.7255 25.7579 29.5766C27.6248 28.2047 30.1732 25.8336 30.1732 25.8336C30.1732 25.8336 24.3676 26.4325 22.0179 27.6944C19.3442 29.1336 16.7286 31.2755 13.9541 34.6183C11.1827 37.9641 9.92392 39.5163 9.18447 40.8944Z" fill-rule="evenodd" clip-rule="evenodd" fill="white"/><path d="M215.887 61.9813C215.887 61.9813 216.287 72.6483 213.491 84.3084C210.698 95.9684 198.271 97.8231 191.626 99.1523C184.98 100.485 177.851 101.053 168.611 101.328C159.374 101.603 147.586 101.199 142.513 101.224C137.441 101.248 131.611 101.514 114.384 101.74C97.1537 101.966 63.7472 102.015 63.7472 102.015C63.7472 102.015 60.3372 102.504 57.8317 102.63C55.3292 102.755 30.5883 102.568 28.3241 102.379C26.063 102.186 22.4086 101.102 18.583 99.4854C14.7605 97.872 7.42105 87.4922 5.94827 85.3839C4.47549 83.2756 3.62604 80.22 3.00882 76.1255C2.39159 72.0311 2.39159 51.238 3.00882 47.1435C3.62604 43.0491 4.47549 39.9935 5.94827 37.8852C7.42105 35.7768 14.7605 25.4002 18.583 23.7838C22.4086 22.1705 26.063 21.0827 28.3241 20.8932C30.5883 20.7007 55.3292 20.5143 57.8317 20.6396C60.3372 20.7649 63.7472 21.2538 63.7472 21.2538C63.7472 21.2538 97.1537 21.3057 114.384 21.5318C131.611 21.7579 137.441 22.0207 142.513 22.0452C147.586 22.0727 159.374 21.6693 168.611 21.9443C177.851 22.2163 184.98 22.7876 191.626 24.1168C198.271 25.446 210.698 27.3038 213.491 38.9607C216.287 50.6208 215.887 61.2878 215.887 61.2878" stroke-width="2.75" stroke-miterlimit="1.5" stroke-linecap="round" stroke-linejoin="round" stroke="#636366"/><path d="M194.195 34.9917C194.195 34.9917 199.014 45.02 199.072 61.6362C199.142 80.7946 194.195 88.2776 194.195 88.2776" stroke-width="2.75" stroke-miterlimit="1.5" stroke-linecap="round" stroke-linejoin="round" stroke="#636366"/><path d="M160.358 36.8525C160.358 36.8525 163.643 46.9817 163.643 61.6362C163.643 76.2876 160.358 86.4168 160.358 86.4168" stroke-width="2.75" stroke-miterlimit="1.5" stroke-linecap="round" stroke-linejoin="round" stroke="#636366"/><path d="M90.3093 88.904C89.1604 86.0043 87.822 79.829 86.8901 75.2365C86.4959 73.3023 85.7534 67.4692 85.7534 61.6361C85.7534 55.8 86.4959 49.9669 86.8901 48.0328C87.822 43.4402 89.1604 37.265 90.3093 34.3652" stroke-width="2.75" stroke-miterlimit="1.5" stroke-linecap="round" stroke-linejoin="round" stroke="#636366"/><path d="M59.7383 27.2886C59.7383 27.2886 85.9703 33.5036 90.3519 34.3744C94.7336 35.2422 99.4147 35.7159 103.784 36.1497C108.157 36.5806 129.918 37.705 142.028 37.5155C154.137 37.3292 176.265 36.0367 184.255 35.4775C190.186 35.062 192.035 35.0314 194.195 34.9917" stroke-width="2.75" stroke-miterlimit="1.5" stroke-linecap="round" stroke-linejoin="round" stroke="#636366"/><path d="M59.7383 95.9846C59.7383 95.9846 85.9703 89.7696 90.3519 88.8988C94.7336 88.031 99.4147 87.5574 103.784 87.1235C108.157 86.6926 129.918 85.5682 142.028 85.7577C154.137 85.944 176.265 87.2365 184.255 87.7957C190.186 88.2112 192.035 88.2418 194.195 88.2815" stroke-width="2.75" stroke-miterlimit="1.5" stroke-linecap="round" stroke-linejoin="round" stroke="#636366"/><path d="M169.027 21.9567C169.027 21.9567 158.739 29.8308 138.929 30.225C127.159 30.4572 101.025 29.6689 92.2282 27.7805C83.4312 25.8953 65.1467 21.2661 65.1467 21.2661" stroke-width="2.75" stroke-miterlimit="1.5" stroke-linecap="round" stroke-linejoin="round" stroke="#636366"/><path d="M169.027 101.332C169.027 101.332 158.739 93.4575 138.929 93.0633C127.159 92.8311 101.025 93.6195 92.2282 95.5078C83.4312 97.3931 65.1467 102.022 65.1467 102.022" stroke-width="2.75" stroke-miterlimit="1.5" stroke-linecap="round" stroke-linejoin="round" stroke="#636366"/><path d="M115.713 21.7979L119.065 29.9806" stroke-width="2.75" stroke-miterlimit="1.5" stroke-linecap="round" stroke-linejoin="round" stroke="#636366"/><path d="M115.713 101.491L119.065 93.308" stroke-width="2.75" stroke-miterlimit="1.5" stroke-linecap="round" stroke-linejoin="round" stroke="#636366"/><path d="M72.3604 16.8151C73.03 15.3896 75.7916 12.7668 77.3652 12.2392C78.9388 11.7116 80.3304 11.8874 80.3057 12.5632C80.2811 13.2389 80.3428 14.5102 79.6763 16.3029C79.0098 18.0925 78.0008 20.888 76.8468 21.0423C75.6928 21.1935 73.2953 21.3756 72.7554 21.4311C72.2154 21.4867 71.5335 20.7893 71.4533 19.8112C71.373 18.8361 71.6939 18.2406 72.3604 16.8151Z" stroke-width="2.75" stroke-miterlimit="1.5" stroke-linecap="round" stroke-linejoin="round" stroke="#636366"/><path d="M72.3517 106.458C73.0148 107.87 75.7495 110.467 77.3078 110.99C78.8662 111.512 80.2442 111.338 80.2198 110.669C80.1953 110 80.2564 108.741 79.5964 106.965C78.9364 105.193 77.9373 102.425 76.7945 102.272C75.6517 102.122 73.2775 101.942 72.7428 101.887C72.2081 101.832 71.5328 102.523 71.4534 103.491C71.3739 104.457 71.6917 105.047 72.3517 106.458Z" stroke-width="2.75" stroke-miterlimit="1.5" stroke-linecap="round" stroke-linejoin="round" stroke="#636366"/><path d="M59.7383 95.9807C59.7383 95.9807 56.0838 92.5279 54.6233 90.0162C53.1627 87.5015 51.7083 82.7043 50.6572 78.4051C50.1316 76.257 49.0408 68.9451 49.0408 61.6362C49.0408 54.3242 50.1316 47.0122 50.6572 44.8642C51.7083 40.565 53.1627 35.7678 54.6233 33.2561C56.0838 30.7414 59.7383 27.2886 59.7383 27.2886" stroke-width="2.75" stroke-miterlimit="1.5" stroke-linecap="round" stroke-linejoin="round" stroke="#636366"/>' +
+            '<g clip-path="url(#carclip)" id="hl"></g><g id="mk"></g><g id="hit"></g>' +
+          '</svg><small id="dcap"></small></div>' +
         '<div class="card wit"><small>Witnesses</small><div id="wl"></div>' +
           '<button class="btn2 icon" id="addw">' + I.plusc + ' Add a witness</button></div>',
       init: function (root) {
@@ -353,7 +391,44 @@
         txt.value = d.text;
         txt.addEventListener('input', function () { d.text = txt.value; save(); });
         root.querySelector('#veh').addEventListener('change', function (e) { d.vehicles = e.target.value; save(); });
-        root.querySelector('#dmg').addEventListener('change', function (e) { d.damage = e.target.value; save(); });
+        (function () {
+          var NS = 'http://www.w3.org/2000/svg';
+          /* zone rectangles in the drawing's 220x123 coordinates; the car points to the left */
+          var Z = { F: [0, 38, 58, 47], FR: [0, 0, 58, 38], FL: [0, 85, 58, 38], R: [58, 0, 105, 61.5], L: [58, 61.5, 105, 61.5],
+                    B: [163, 38, 57, 47], BR: [163, 0, 57, 38], BL: [163, 85, 57, 38] };
+          var hl = root.querySelector('#hl'), mk = root.querySelector('#mk'), hit = root.querySelector('#hit'), cap = root.querySelector('#dcap');
+          var sel = (d.zones || []).slice();
+          function el(tag, attrs, parent) { var e = document.createElementNS(NS, tag); for (var k in attrs) e.setAttribute(k, attrs[k]); parent.appendChild(e); return e; }
+          function paint() {
+            hl.innerHTML = ''; mk.innerHTML = '';
+            sel.forEach(function (z) {
+              var r = Z[z];
+              el('rect', { x: r[0], y: r[1], width: r[2], height: r[3], fill: '#30d158', 'fill-opacity': '.38' }, hl);
+              var cx = r[0] + r[2] / 2, cy = r[1] + r[3] / 2;
+              if (z === 'R' || z === 'L') cx = 112;
+              if (z === 'F') cx = 24; if (z === 'B') cx = 196;
+              if (z.length === 2) { cx = r[0] + r[2] / 2; cy = z[0] === 'F' || z[0] === 'B' ? (z[1] === 'R' ? 20 : 103) : cy; }
+              el('circle', { cx: cx, cy: cy, r: 9, fill: '#30d158', stroke: '#000', 'stroke-width': 2.5 }, mk);
+              el('path', { d: 'M' + (cx - 4) + ' ' + cy + 'l3 3 5-6', fill: 'none', stroke: '#000', 'stroke-width': 2, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }, mk);
+            });
+            hit.querySelectorAll('[role=button]').forEach(function (g) { g.setAttribute('aria-pressed', sel.indexOf(g.dataset.z) > -1); });
+            cap.textContent = sel.length ? d.damage : 'No area selected';
+            cap.classList.toggle('none', !sel.length);
+          }
+          function toggle(z) {
+            var i = sel.indexOf(z);
+            if (i > -1) sel.splice(i, 1); else sel.push(z);
+            sel.sort(function (a, b) { return ZONE_ORDER.indexOf(a) - ZONE_ORDER.indexOf(b); });
+            d.zones = sel.slice(); d.damage = sel.length ? zonesToDamage(sel) : ''; save(); paint();
+          }
+          ZONE_ORDER.forEach(function (z) {
+            var r = Z[z], g = el('g', { role: 'button', tabindex: 0, 'aria-label': ZONE_NAME[z], 'data-z': z, style: 'cursor:pointer;outline:none' }, hit);
+            el('rect', { x: r[0], y: r[1], width: r[2], height: r[3], fill: 'transparent' }, g);
+            g.addEventListener('click', function () { toggle(z); });
+            g.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(z); } });
+          });
+          paint();
+        })();
         function drawW() {
           wl.innerHTML = '';
           d.witnesses.forEach(function (w, i) {
@@ -368,11 +443,12 @@
             el.querySelector('.link').addEventListener('click', function () { d.witnesses.splice(i, 1); save(); drawW(); });
             wl.appendChild(el);
           });
+          root.querySelector('#addw').hidden = d.witnesses.length >= MAX_WITNESSES;
         }
         drawW();
         root.querySelector('#addw').addEventListener('click', function () {
-          d.witnesses.push({ name: '', contact: '' }); save(); drawW();
-          var f = wl.querySelectorAll('.wi'); f[f.length - 1].querySelector('input').focus();
+          if (d.witnesses.length >= MAX_WITNESSES) return;
+          d.witnesses.push({ name: MOCK_WITNESS.name, contact: MOCK_WITNESS.contact }); save(); drawW();
         });
       }
     };
@@ -407,29 +483,63 @@
   }
 
   /* opts: { title, hint, shape: 'vehicle'|'document', src, label, onDone(imageUrl) } */
+  var USE_REAL_CAMERA = false;   // false = show the pre-made picture instead of the device camera
+
   function openCamera(opts) {
     var landscape = opts.shape === 'document';
     var prevOverflow = app.style.overflow; app.scrollTop = 0; app.style.overflow = 'hidden';
     var el = document.createElement('div'); el.className = 'cam';
     el.innerHTML =
-      '<video playsinline muted autoplay></video><div class="cam-fallback">Camera preview</div>' +
+      (USE_REAL_CAMERA ? '<video playsinline muted autoplay></video>' : '') +
+      '<div class="cam-fallback">Camera preview</div><div class="cam-feed"><img alt=""></div>' +
       '<div class="cam-top"><button class="cam-x" aria-label="Close">' + I.left + '</button><span>' + opts.title + '</span><i></i></div>' +
       '<div class="cam-guide ' + (landscape ? 'g-doc' : 'g-veh') + '"></div>' +
       '<p class="cam-hint">' + opts.hint + '</p>' +
       '<div class="cam-bot"><button class="cam-shutter" aria-label="Take picture"></button></div>' +
       '<img class="cam-shot" alt="" hidden><div class="cam-busy" hidden><span class="spin big"></span><p>Analysing picture</p></div><div class="cam-flash"></div>';
     app.appendChild(el);
-    var video = el.querySelector('video'), stream = null, closed = false, busy = false;
+    var video = el.querySelector('video'), stream = null, closed = false, busy = false, raf = 0, onOri = null;
     var pre = resolveImg(opts.src, opts.label, landscape);
+
+    /* Fake viewfinder: the picture that will be "taken" is shown behind the overlay and drifts with the
+       device's tilt (or on its own where there is no motion sensor), so it feels like the camera is looking around. */
+    var feed = el.querySelector('.cam-feed'), feedImg = feed.querySelector('img');
+    pre.then(function (url) { if (closed) return; feedImg.src = url; el.classList.add('live'); });
+    (function motion() {
+      var tilt = { x: 0, y: 0 }, base = null, gotSensor = false, cur = { x: 0, y: 0 }, t0 = Date.now();
+      function clamp(v) { return Math.max(-1, Math.min(1, v)); }
+      onOri = function (e) {
+        if (e.gamma == null || e.beta == null) return;
+        gotSensor = true; if (!base) base = { g: e.gamma, b: e.beta };
+        tilt.x = clamp((e.gamma - base.g) / 20); tilt.y = clamp((e.beta - base.b) / 20);
+      };
+      var DOE = window.DeviceOrientationEvent;
+      if (DOE) {
+        if (typeof DOE.requestPermission === 'function') {   // iOS: needs a tap, which opening the camera is
+          DOE.requestPermission().then(function (r) { if (r === 'granted' && !closed) window.addEventListener('deviceorientation', onOri); }).catch(function () {});
+        } else { window.addEventListener('deviceorientation', onOri); }
+      }
+      (function loop() {
+        if (closed) return;
+        var t = (Date.now() - t0) / 1000, amp = gotSensor ? 1.2 : 4;      // idle drift in %, larger without a sensor
+        var tx = -tilt.x * 11 + Math.sin(t * 0.9) * amp, ty = -tilt.y * 11 + Math.cos(t * 0.7) * amp * 0.8;
+        cur.x += (tx - cur.x) * 0.08; cur.y += (ty - cur.y) * 0.08;
+        feed.style.transform = 'translate3d(' + cur.x.toFixed(2) + '%,' + cur.y.toFixed(2) + '%,0) scale(1.32)';
+        raf = requestAnimationFrame(loop);
+      })();
+    })();
 
     function close() {
       if (closed) return; closed = true;
       if (stream) stream.getTracks().forEach(function (t) { t.stop(); });
+      if (raf) cancelAnimationFrame(raf);
+      if (onOri) window.removeEventListener('deviceorientation', onOri);
       app.style.overflow = prevOverflow; el.remove();
     }
     var prevCleanup = cleanup; cleanup = function () { close(); if (prevCleanup) prevCleanup(); };
 
-    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+    /* Real camera feed - archived: set USE_REAL_CAMERA = true (top of this section) to bring it back */
+    if (USE_REAL_CAMERA && navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
       navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false }).then(function (s) {
         if (closed) { s.getTracks().forEach(function (t) { t.stop(); }); return; }
         stream = s; video.srcObject = s; el.classList.add('live');
@@ -470,6 +580,31 @@
     'Other damage': ['front', 'back', 'left', 'right']
   };
   var DEFAULT_DAMAGE = 'Rear and side damage';
+  /* Tap zones on the vehicle drawing (screen 5) -> damage value / photo angle */
+  var ZONE_ORDER = ['F', 'FR', 'R', 'BR', 'B', 'BL', 'L', 'FL'];
+  var ZONE_ANGLE = { F: 'front', FR: 'front-right', R: 'right', BR: 'back-right', B: 'back', BL: 'back-left', L: 'left', FL: 'front-left' };
+  var ZONE_NAME = { F: 'Front', FR: 'Front right corner', R: 'Right side', BR: 'Rear right corner', B: 'Rear', BL: 'Rear left corner', L: 'Left side', FL: 'Front left corner' };
+  var DAMAGE_ZONES = {
+    'Front damage': ['F'], 'Front left damage': ['FL'], 'Front right damage': ['FR'],
+    'Left side damage': ['L'], 'Right side damage': ['R'],
+    'Rear damage': ['B'], 'Rear left damage': ['BL'], 'Rear right damage': ['BR'],
+    'Front and side damage': ['F', 'R'], 'Rear and side damage': ['B', 'R'], 'Other damage': ['F', 'B', 'L', 'R']
+  };
+  var SINGLE_ZONE = { F: 'Front damage', FL: 'Front left damage', FR: 'Front right damage', L: 'Left side damage', R: 'Right side damage', B: 'Rear damage', BL: 'Rear left damage', BR: 'Rear right damage' };
+  function zonesToDamage(z) {
+    if (z.length === 1) return SINGLE_ZONE[z[0]];
+    if (z.length === 2) {
+      var f = z.indexOf('F') > -1, b = z.indexOf('B') > -1, sd = z.indexOf('L') > -1 || z.indexOf('R') > -1;
+      if (f && sd) return 'Front and side damage';
+      if (b && sd) return 'Rear and side damage';
+    }
+    return 'Other damage';
+  }
+  function setDamage(d, value) { d.damage = value; d.zones = DAMAGE_ZONES[value].slice(); }
+  function damageZones(d) {
+    return (d && d.zones && d.zones.length) ? d.zones : DAMAGE_ZONES[(d && DAMAGE_ZONES[d.damage]) ? d.damage : DEFAULT_DAMAGE];
+  }
+  function damageAngles(d) { return damageZones(d).map(function (z) { return ZONE_ANGLE[z]; }); }
 
   /* Photos are kept in memory only (a refresh clears them) */
   var photoUrls = {};
@@ -496,8 +631,7 @@
       init: function (root) {
         var pc = root.querySelector('#pc');
         function cards() {
-          var dmg = (state.details && DAMAGE_ANGLES[state.details.damage]) ? state.details.damage : DEFAULT_DAMAGE;
-          var list = DAMAGE_ANGLES[dmg].map(function (a, n) {
+          var list = damageAngles(state.details).map(function (a, n) {
             return { key: a, label: ANGLES[a], img: 'assets/illustrations/' + a + '.svg', src: DEMO_PHOTOS[n % DEMO_PHOTOS.length], req: true };
           });
           for (var k = 0; k < (state.extraPhotos || 0); k++) list.push({ key: 'x' + (k + 1), label: 'Additional photo ' + (k + 1), ill: 'generic', src: DEMO_PHOTOS[(list.length) % DEMO_PHOTOS.length] });
@@ -541,6 +675,27 @@
   function mockValues(k) { var v = {}; DOC_DEF[k].fields.forEach(function (f) { v[f[0]] = f[2]; }); return v; }
   function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;'); }
 
+  /* Mock login popup (any button signs in) */
+  var G_LOGO = '<svg width="20" height="20" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.5 12.2c0-.8-.1-1.5-.2-2.2H12v4.2h5.9a5 5 0 01-2.2 3.3v2.7h3.5c2.1-1.9 3.3-4.7 3.3-8z"/><path fill="#34A853" d="M12 23c3 0 5.5-1 7.3-2.7l-3.5-2.7c-1 .7-2.2 1.1-3.8 1.1-2.9 0-5.4-2-6.3-4.6H2.1v2.8A11 11 0 0012 23z"/><path fill="#FBBC05" d="M5.7 14.1a6.6 6.6 0 010-4.2V7.1H2.1a11 11 0 000 9.8z"/><path fill="#EA4335" d="M12 5.4c1.6 0 3.1.6 4.3 1.7l3.2-3.2A11 11 0 002.1 7.1l3.6 2.8C6.6 7.4 9.1 5.4 12 5.4z"/></svg>';
+  var A_LOGO = '<svg width="20" height="20" viewBox="0 0 24 24" fill="#fff"><path d="M16.4 12.6c0-2.4 2-3.5 2.1-3.6-1.1-1.700-2.900-1.900-3.500-1.900-1.500-.2-2.900.9-3.700.9s-1.900-.9-3.200-.8c-1.600 0-3.100 1-4 2.400-1.700 3-.4 7.300 1.200 9.700.8 1.200 1.800 2.500 3 2.400 1.200 0 1.700-.8 3.100-.8s1.900.8 3.200.8 2.100-1.200 2.900-2.300c.9-1.300 1.300-2.600 1.300-2.700 0 0-2.400-.9-2.400-3.700zM14 5.500c.7-.8 1.100-1.900 1-3-1 0-2.100.7-2.800 1.500-.6.700-1.200 1.800-1 2.900 1.100.1 2.100-.5 2.800-1.400z"/></svg>';
+  function openLogin(onSuccess) {
+    var m = document.createElement('div'); m.className = 'modal-bg'; m.setAttribute('role', 'dialog'); m.setAttribute('aria-modal', 'true'); m.setAttribute('aria-label', 'Log in');
+    m.innerHTML = '<div class="modal login"><button class="mx" aria-label="Close">' + I.xmark.replace('class="oi"', 'width="20" height="20"') + '</button>' +
+      '<h2>Log in</h2><p class="lsub">Use your account to fill in your contact details.</p>' +
+      '<label class="ef"><span>Email</span><input type="email" value="jan.dvorak@email.com" autocomplete="off"></label>' +
+      '<label class="ef"><span>Password</span><input type="password" value="password123" autocomplete="off"></label>' +
+      '<button class="btn on go">Log in</button>' +
+      '<div class="or"><span>or</span></div>' +
+      '<button class="btn2 soc go">' + G_LOGO + ' Continue with Google</button>' +
+      '<button class="btn2 soc go">' + A_LOGO + ' Continue with Apple</button></div>';
+    app.appendChild(m);
+    function close() { m.remove(); }
+    m.querySelector('.mx').addEventListener('click', close);
+    m.addEventListener('click', function (e) { if (e.target === m) close(); });
+    m.querySelectorAll('.go').forEach(function (b) { b.addEventListener('click', function () { close(); onSuccess(); }); });
+    var prev = cleanup; cleanup = function () { m.remove(); if (prev) prev(); };
+  }
+
   function documentsScreen(filled) {
     if (!state.docs) { state.docs = {}; DOC_KEYS.forEach(function (k) { state.docs[k] = { mode: 'empty', values: {} }; }); }
     if (filled) DOC_KEYS.forEach(function (k) { state.docs[k] = { mode: 'filled', values: mockValues(k) }; });
@@ -580,7 +735,10 @@
         dc.addEventListener('click', function (e) {
           var b = e.target.closest('[data-act]'); if (!b) return;
           var k = b.dataset.k, s = docsState[k], act = b.dataset.act;
-          if (act === 'login') { s.mode = 'filled'; s.values = mockValues(k); }
+          if (act === 'login') {
+            openLogin(function () { s.mode = 'filled'; s.values = mockValues(k); save(); if (tok === token) draw(); });
+            return;
+          }
           else if (act === 'manual') { s.prev = s.mode; s.mode = 'edit'; s.values = {}; }
           else if (act === 'edit') { s.prev = s.mode; s.mode = 'edit'; }
           else if (act === 'cancel') { s.mode = s.prev || 'empty'; }
@@ -608,7 +766,7 @@
   }
 
   /* ---------- Share form with the other party ---------- */
-  var WAIT_MS = 8000; // how long "waiting for the other driver" lasts before moving on (0 = never move on)
+  var WAIT_MS = 3000; // how long "waiting for the other driver" lasts before moving on (0 = never move on)
 
   function shareScreen() {
     var opts = [
@@ -636,7 +794,7 @@
   function waitingScreen() {
     return {
       bar: { title: 'Share form', back: true, step: 6 }, fill: true,
-      html: '<div class="center"><p>Waiting for the other driver to finish filling the report.</p></div>',
+      html: '<div class="center col"><span class="spin big" aria-hidden="true"></span><p>Waiting for the other driver to finish filling the report.</p></div>',
       init: function () {
         if (!WAIT_MS) return;
         var t = setTimeout(function () { location.hash = 'sign'; }, WAIT_MS);
@@ -948,7 +1106,7 @@
             handle: function (t) {
               var v = parseDamage(t);
               if (!v) return say('Sorry, I’m not sure which part that is. You can say for example “rear left” or choose from the options.').then(function () { return go('damage', true); });
-              d.damage = v; save(); return say(v + ' – noted.').then(function () { return go('witnesses'); });
+              setDamage(d, v); save(); return say(v + ' – noted.').then(function () { return go('witnesses'); });
             } },
           witnesses: { q: 'Were there any witnesses?', chips: ['Yes', 'No'],
             handle: function (t) {
@@ -995,7 +1153,7 @@
 
         /* photos: one request per angle that belongs to the chosen damage type */
         function startPhotos() {
-          photoQueue = DAMAGE_ANGLES[d.damage].slice(); photoN = 0; photosTaken = 0;
+          photoQueue = damageAngles(d); photoN = 0; photosTaken = 0;
           var list = photoQueue.map(function (a) { return ANGLES[a].replace('Vehicle ', '').replace(/ side$/, ' side'); }).join(', ');
           return say('Thanks. Now I need ' + (photoQueue.length === 1 ? 'one photo' : photoQueue.length + ' photos') + ' of the damage – ' + list + '.').then(nextPhoto);
         }
@@ -1060,15 +1218,15 @@
     { id: 'start', label: 'Is everyone all right?', figma: '43:7044', build: startScreen, noBack: true },
     { id: 'safety', label: 'Roadside safety', figma: '43:6880', build: function () {
       return checklist('safety', 'Roadside safety', 'Make sure you follow the safety suggestions:', [
-        ['Hazard lights active', 'Turn on your hazard lights to warn approaching drivers that your vehicle has stopped.'],
-        ['High-visibility vest worn', 'Put on your vest before leaving the car so other drivers can see you clearly.'],
-        ['Warning triangle placed', 'Place the triangle well behind your vehicle, about 50 meters on regular roads and 100 meters on highways, to give traffic time to slow down.']
+        ['Hazard lights active', 'Turn on your hazard lights to warn approaching drivers that your vehicle has stopped.', 'hazard-lights'],
+        ['High-visibility vest worn', 'Put on your vest before leaving the car so other drivers can see you clearly.', 'vest'],
+        ['Warning triangle placed', 'Place the triangle well behind your vehicle, about 50 meters on regular roads and 100 meters on highways, to give traffic time to slow down.', 'triangle']
       ], 'police-check'); } },
     { id: 'police-check', label: 'Police involvement', figma: '79:3219', build: function () {
       return checklist('police', 'Police involvement', 'Check that the accident meets the criteria for not involving the police:', [
-        ['Damage on neither vehicle is above 200 000 CZK', 'Each of the affected vehicles is only lightly damaged, with damage cost estimate below 200 000 CZK'],
-        ['No damage to a 3rd party', 'There is no damage to a third party property - like damaged fence, parked cars or a building.']
-      ], 'location'); } },
+        ['Damage is less than 200 000 CZK', 'Each of the affected vehicles is only lightly damaged, with damage cost estimate below 200 000 CZK', 'damage-vehicle'],
+        ['No damage to a 3rd party', 'There is no damage to a third party property - like damaged fence, parked cars or a building.', 'third-party']
+      ], 'location', 'If the damage on either vehicle is above 200 000 CZK, or a third party was damaged, you should call the police.'); } },
     { id: 'location', label: 'Accident location', figma: '43:6689', build: locationScreen },
     { id: 'details', label: 'Accident details (form)', figma: '13:479', build: detailsScreen },
     { id: 'photos', label: 'Photos of damage', figma: '79:3450', build: photosScreen },

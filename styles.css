@@ -29,7 +29,7 @@ body{display:flex}
 .opt.danger{border-color:var(--red);background:var(--red-bg)}
 /* Controls wrap: always at the bottom of the page wrap, stays visible while content scrolls */
 .controls{position:sticky;bottom:0;flex:none;display:flex;flex-direction:column;gap:12px;
-  padding:24px var(--gutter) calc(24px + env(safe-area-inset-bottom,0px));
+  padding:24px var(--gutter) calc(48px + env(safe-area-inset-bottom,0px));
   background:linear-gradient(to top,var(--bg) 75%,rgba(0,0,0,0))}
 .btn{width:100%;height:44px;border-radius:22px;border:0;font:inherit;font-weight:700;font-size:16px;
   background:var(--btn-off);color:var(--faint);cursor:not-allowed}
@@ -263,3 +263,64 @@ body{display:flex}
 @keyframes vcpulse2{0%,100%{box-shadow:0 0 0 0 rgba(255,69,58,.45)}50%{box-shadow:0 0 0 12px rgba(255,69,58,0)}}
 .vc-end{display:flex;gap:12px}
 .vc-end .btn2,.vc-end .btn{flex:1;display:flex;align-items:center;justify-content:center;text-decoration:none;margin:0}
+
+/* Sketch: Add element menu */
+.row{position:relative}
+.menu{position:absolute;left:0;bottom:calc(100% - 12px);min-width:220px;background:var(--card);border:1px solid #3a3a3c;border-radius:16px;padding:6px;box-shadow:0 8px 24px rgba(0,0,0,.6);z-index:700}
+.menu button{display:flex;align-items:center;gap:14px;width:100%;height:48px;padding:0 12px;background:none;border:0;border-radius:12px;color:#fff;font:inherit;font-size:16px;font-weight:700;cursor:pointer;text-align:left}
+.menu button:hover,.menu button:focus-visible{background:#2a2a2c}
+
+/* Login popup */
+.modal.login{position:relative;text-align:left}
+.modal.login h2{margin:4px 0 4px}
+.modal.login .lsub{margin:0 0 16px;padding:0}
+.modal.login .mx{position:absolute;right:12px;top:12px;width:36px;height:36px;border:0;background:none;display:flex;align-items:center;justify-content:center;cursor:pointer}
+.modal.login .mx svg{stroke:#fff}
+.modal.login .ef{display:block;margin-bottom:12px}
+.modal.login .ef span{display:block;font-size:14px;line-height:20px;color:var(--muted);margin-bottom:4px}
+.modal.login .ef input{width:100%;height:44px;border-radius:12px;border:1px solid #3a3a3c;background:#111;color:#fff;font:inherit;font-size:16px;padding:0 14px}
+.modal.login .btn{margin-top:4px}
+.modal.login .or{display:flex;align-items:center;gap:12px;margin:16px 0;color:var(--faint);font-size:14px}
+.modal.login .or::before,.modal.login .or::after{content:'';flex:1;height:1px;background:#3a3a3c}
+.modal.login .soc{display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:10px}
+.modal.login .soc:last-child{margin-bottom:0}
+
+/* Checklist tiles with an icon above the heading (4px gaps) */
+.opt.chk .ci{display:block;width:32px;height:32px;margin-bottom:4px}
+.opt.chk b{margin-bottom:4px}
+.opt.chk{align-items:flex-start}
+.opt.chk .ico{margin-top:0}
+
+/* Start screen: primary button inside the first tile */
+.opt.start{flex-wrap:wrap;cursor:default}
+.opt.start .txt{flex:1 1 0;min-width:0}
+.opt.start .btn{flex:1 0 100%;margin-top:8px;display:flex;align-items:center;justify-content:center;text-decoration:none}
+
+/* Screen 5: tap-the-damage vehicle drawing */
+.dmgmap{margin-top:16px;padding:16px;text-align:center}
+.dmgmap p{margin:0 0 16px;text-align:left;font-size:16px;line-height:22px;color:var(--muted)}
+.dmgmap svg{display:block;width:100%;max-width:300px;height:auto;margin:0 auto;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
+.dmgmap svg [role=button]:focus-visible rect{stroke:#fff;stroke-width:1.5;stroke-dasharray:4 3}
+.dmgmap small{display:block;margin-top:12px;font-size:14px;line-height:20px;color:var(--green);font-weight:700}
+
+/* Start screen tile: centred text, no icon */
+.opt.start .txt{text-align:center}
+.opt.start .txt span{margin-top:2px}
+
+/* Details: separate tiles per question */
+.card.form{padding-bottom:18px}
+.card.form.vehq{padding:0 24px}
+.card.form.vehq .sel{border-bottom:0}
+.dmgmap small.none{color:var(--faint);font-weight:400}
+.dmgmap small{min-height:20px}
+
+/* Camera: the picture replaces the live feed and drifts */
+.cam-feed{position:absolute;inset:0;overflow:hidden;opacity:0;transition:opacity .3s}
+.cam.live .cam-feed{opacity:1}
+.cam-feed img{display:block;width:100%;height:100%;object-fit:cover;pointer-events:none}
+.cam-feed{will-change:transform}
+
+/* Waiting screen */
+.center.col{flex-direction:column;gap:20px}
+.center.col p{margin:0}
+[hidden]{display:none!important}
