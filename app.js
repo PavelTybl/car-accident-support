@@ -483,7 +483,7 @@
   }
 
   /* opts: { title, hint, shape: 'vehicle'|'document', src, label, onDone(imageUrl) } */
-  var MOTION_X = 1, MOTION_Y = 1;   // direction of the fake camera's movement; set to -1 to reverse an axis
+  var MOTION_X = -1, MOTION_Y = -1;   // direction of the fake camera's movement; set to -1 to reverse an axis
   var USE_REAL_CAMERA = false;   // false = show the pre-made picture instead of the device camera
 
   function openCamera(opts) {
