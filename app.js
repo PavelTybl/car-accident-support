@@ -40,6 +40,46 @@
   var app = document.getElementById('app');
   var cleanup = null;
 
+  /* ---------- Language: all texts live in lang/<code>.json; ?lang=de|en|it|cz picks one ---------- */
+  var LANGS = [['en', 'EN', 'English'], ['de', 'DE', 'Deutsch'], ['it', 'IT', 'Italiano'], ['cz', 'CZ', 'Čeština']];
+  var lang = 'en', dict = {}, fallback = {};
+  function normLang(c) {
+    c = String(c || '').toLowerCase().slice(0, 2); if (c === 'cs') c = 'cz';
+    return LANGS.some(function (l) { return l[0] === c; }) ? c : null;
+  }
+  function pickLang() {
+    var q = null; try { q = new URLSearchParams(location.search).get('lang'); } catch (e) {}
+    var c = normLang(q);
+    if (c) { try { localStorage.setItem('aw-lang', c); } catch (e) {} return c; }
+    try { c = normLang(localStorage.getItem('aw-lang')); } catch (e) {}
+    if (c) return c;
+    var nav = navigator.languages || [navigator.language];
+    for (var i = 0; i < nav.length; i++) { c = normLang(nav[i]); if (c) return c; }
+    return 'en';
+  }
+  /* t('key', {name: value}) -> text in the current language (falls back to English, then to the key) */
+  function t(key, vars) {
+    var v = dict[key]; if (v == null) v = fallback[key]; if (v == null) return key;
+    if (typeof v !== 'string' || !vars) return v;
+    return v.replace(/\{(\w+)\}/g, function (m, k) { return vars[k] != null ? vars[k] : m; });
+  }
+  function loadJSON(code) { return fetch('lang/' + code + '.json').then(function (r) { if (!r.ok) throw new Error(code); return r.json(); }); }
+  function loadLang(code) {
+    var p = Object.keys(fallback).length ? Promise.resolve() : loadJSON('en').then(function (d) { fallback = d; });
+    return p.then(function () { return code === 'en' ? fallback : loadJSON(code).catch(function () { return fallback; }); })
+      .then(function (d) { dict = d; lang = code; document.documentElement.lang = code === 'cz' ? 'cs' : code; });
+  }
+  function setLang(code) {
+    if (code === lang) return;
+    try { localStorage.setItem('aw-lang', code); } catch (e) {}
+    try { var u = new URL(location.href); u.searchParams.set('lang', code); history.replaceState(null, '', u.pathname + u.search + u.hash); } catch (e) {}
+    loadLang(code).then(render);
+  }
+  /* regular expression built from a '|' separated word list in the language file */
+  function rx(key, whole) { return new RegExp('(^|[^\\p{L}\\p{N}])(' + t(key) + ')' + (whole ? '(?![\\p{L}\\p{N}])' : ''), 'iu'); }
+  function geoLang() { return (t('voice.lang') || 'en').split('-')[0]; }
+  function photonLang() { var l = geoLang(); return l === 'de' || l === 'it' ? l : 'en'; }
+
   function toast(msg) {
     var host = app.querySelector('.controls') || app;
     var old = app.querySelector('.toast'); if (old) old.remove();
@@ -69,19 +109,19 @@
   function jget(url) { return fetch(url).then(function (r) { return r.json(); }); }
 
   function geocode(q) {
-    return jget('https://nominatim.openstreetmap.org/search?format=json&limit=1&accept-language=en&q=' + encodeURIComponent(q))
+    return jget('https://nominatim.openstreetmap.org/search?format=json&limit=1&accept-language=' + geoLang() + '&q=' + encodeURIComponent(q))
       .then(function (a) { return a && a[0] ? { lat: +a[0].lat, lng: +a[0].lon } : null; })
       .catch(function () { return null; })
       .then(function (r) {
         if (r) return r;
-        return jget('https://photon.komoot.io/api/?limit=1&lang=en&q=' + encodeURIComponent(q))
+        return jget('https://photon.komoot.io/api/?limit=1&lang=' + photonLang() + '&q=' + encodeURIComponent(q))
           .then(function (j) { var f = j && j.features && j.features[0]; return f ? { lat: f.geometry.coordinates[1], lng: f.geometry.coordinates[0] } : null; })
           .catch(function () { return null; });
       });
   }
 
   function reverse(lat, lng) {
-    return jget('https://nominatim.openstreetmap.org/reverse?format=jsonv2&accept-language=en&lat=' + lat + '&lon=' + lng)
+    return jget('https://nominatim.openstreetmap.org/reverse?format=jsonv2&accept-language=' + geoLang() + '&lat=' + lat + '&lon=' + lng)
       .then(function (j) {
         var a = j && j.address; if (!a) return null;
         var street = [a.road, a.house_number].filter(Boolean).join(' ');
@@ -91,7 +131,7 @@
       .catch(function () { return null; })
       .then(function (r) {
         if (r) return r;
-        return jget('https://photon.komoot.io/reverse?lang=en&lat=' + lat + '&lon=' + lng)
+        return jget('https://photon.komoot.io/reverse?lang=' + photonLang() + '&lat=' + lat + '&lon=' + lng)
           .then(function (j) {
             var p = j && j.features && j.features[0] && j.features[0].properties; if (!p) return null;
             var street = [p.street || p.name, p.housenumber].filter(Boolean).join(' ');
@@ -104,6 +144,7 @@
 
   /* Fallback used when the visitor declines or can't share their location */
   var DEFAULT_ADDR = 'K Háječku 29, 100 00 Strašnice';
+  function addrText(loc) { return (loc.address === '@current' || loc.address === 'Your current location') ? t('location.current') : loc.address; }
   function getLoc() {
     if (!state.location) state.location = { address: DEFAULT_ADDR, lat: 50.0705, lng: 14.5, resolved: false, source: 'default' };
     return state.location;
@@ -133,7 +174,7 @@
     navigator.geolocation.getCurrentPosition(function (pos) {
       if (loc.source !== 'manual') {
         loc.lat = pos.coords.latitude; loc.lng = pos.coords.longitude; loc.source = 'gps'; loc.resolved = true;
-        loc.address = 'Your current location'; save();
+        loc.address = '@current'; save();
         reverse(loc.lat, loc.lng).then(function (addr) { if (addr && loc.source === 'gps') { loc.address = addr; save(); } geoSettled(); });
       } else geoSettled();
     }, function () { geoSettled(); }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 });
@@ -142,14 +183,14 @@
   /* ---------- Screens ---------- */
   function startScreen() {
     return {
-      bar: { title: 'Car accident support' },
+      bar: { title: t('app.title') },
       html:
-        '<h2>Is everyone all right?</h2>' +
-        '<p class="intro">Your safety comes first. Please confirm that you and everyone else at the scene are unhurt.</p>' +
+        '<h2>' + t('start.title') + '</h2>' +
+        '<p class="intro">' + t('start.intro') + '</p>' +
         '<div class="stack">' +
-        '<div class="opt start"><div class="txt"><b>Yes, everyone is all right.</b><span>Start the accident report assistant.</span></div>' +
-        '<a class="btn on" href="#safety">Start the form</a></div>' +
-        '<a class="opt danger" href="tel:112">' + I.alert + '<div class="txt"><b>No, emergency!</b><span>Call police and ambulance now</span></div>' + I.right + '</a>' +
+        '<div class="opt start"><div class="txt"><b>' + t('start.yes.title') + '</b><span>' + t('start.yes.text') + '</span></div>' +
+        '<a class="btn on" href="#safety">' + t('start.yes.cta') + '</a></div>' +
+        '<a class="opt danger" href="tel:112">' + I.alert + '<div class="txt"><b>' + t('start.emergency.title') + '</b><span>' + t('start.emergency.text') + '</span></div>' + I.right + '</a>' +
         '</div>'
     };
   }
@@ -195,16 +236,16 @@
 
   function locationScreen() {
     return {
-      bar: { title: 'Accident location', back: true, step: 1 }, next: 'details', cta: "Yes, that's correct", fill: true,
+      bar: { title: t('location.title'), back: true, step: 1 }, next: 'details', cta: t('location.cta'), fill: true,
       html:
-        '<p class="intro">Confirm the location where the accident occured:</p>' +
+        '<p class="intro">' + t('location.intro') + '</p>' +
         '<div class="card grow">' +
-          '<div id="v-confirm"><h3>Is this the accident location?</h3><div class="map loc" id="locmap"></div>' +
-            '<p class="addr" id="locaddr"></p><button class="btn2" id="manual">No, enter manually</button></div>' +
-          '<div id="v-manual" hidden><h3>Enter the accident location</h3>' +
-            '<input class="field" id="q" type="text" placeholder="Street, number, city" autocomplete="street-address">' +
-            '<p class="err" id="err"></p><button class="btn2" id="find">Find on map</button>' +
-            '<button class="btn2 ghost" id="cancel">Cancel</button></div>' +
+          '<div id="v-confirm"><h3>' + t('location.confirm') + '</h3><div class="map loc" id="locmap"></div>' +
+            '<p class="addr" id="locaddr"></p><button class="btn2" id="manual">' + t('location.manual') + '</button></div>' +
+          '<div id="v-manual" hidden><h3>' + t('location.enter') + '</h3>' +
+            '<input class="field" id="q" type="text" placeholder="' + t('location.placeholder') + '" autocomplete="street-address">' +
+            '<p class="err" id="err"></p><button class="btn2" id="find">' + t('location.find') + '</button>' +
+            '<button class="btn2 ghost" id="cancel">' + t('common.cancel') + '</button></div>' +
         '</div>',
       init: function (root) {
         var loc = getLoc(), mapEl = root.querySelector('#locmap');
@@ -213,15 +254,15 @@
         var addr = root.querySelector('#locaddr'), vc = root.querySelector('#v-confirm'), vm = root.querySelector('#v-manual'),
             q = root.querySelector('#q'), err = root.querySelector('#err');
         function show() {
-          addr.textContent = geo.done ? loc.address : 'Finding your location…';
+          addr.textContent = geo.done ? addrText(loc) : t('location.finding');
           m.setView([loc.lat, loc.lng], 17, { animate: false }); mk.setLatLng([loc.lat, loc.lng]);
         }
         show(); onGeo(show);
         root.querySelector('#manual').addEventListener('click', function () { vc.hidden = true; vm.hidden = false; q.value = ''; q.focus(); });
         function find() {
-          var v = q.value.trim(); if (!v) return; err.textContent = 'Searching…';
+          var v = q.value.trim(); if (!v) return; err.textContent = t('location.searching');
           geocode(v).then(function (r) {
-            if (!r) { err.textContent = "We couldn't find that address. Try adding the city."; return; }
+            if (!r) { err.textContent = t('location.notfound'); return; }
             loc.address = v; loc.lat = r.lat; loc.lng = r.lng; loc.resolved = true; loc.source = 'manual'; save();
             err.textContent = ''; vm.hidden = true; vc.hidden = false; geo.done = true; m.invalidateSize(); show();
           });
@@ -242,11 +283,11 @@
 
   function sketchScreen() {
     return {
-      bar: { title: 'Accident sketch', back: true, step: 4 }, next: 'documents', cta: 'Next', fill: true,
+      bar: { title: t('sketch.title'), back: true, step: 4 }, next: 'documents', cta: t('common.next'), fill: true,
       html:
-        '<div class="seg" role="tablist"><button data-k="A" class="on">Vehicle A</button><button data-k="B">Vehicle B</button></div>' +
+        '<div class="seg" role="tablist"><button data-k="A" class="on">' + t('sketch.vehicleA') + '</button><button data-k="B">' + t('sketch.vehicleB') + '</button></div>' +
         '<div class="card flush grow"><div class="sketch" id="sk"><div class="map" id="skmap"></div></div></div>' +
-        '<div class="row"><button id="add">' + I.plus + ' Add element</button><button id="edit">' + I.pencil + ' Edit</button></div>',
+        '<div class="row"><button id="add">' + I.plus + ' ' + t('sketch.add') + '</button><button id="edit">' + I.pencil + ' ' + t('common.edit') + '</button></div>',
       init: function (root) {
         var loc = getLoc();
         var box = root.querySelector('#sk');
@@ -261,10 +302,10 @@
         var els = {}, ctrls = document.createElement('div');
         ctrls.className = 'ctrls';
         ctrls.innerHTML =
-          '<button data-act="move" style="left:0;top:-60px" aria-label="Move">' + I.move + '</button>' +
-          '<button data-act="car" style="left:-60px;top:0" aria-label="Vehicle type">' + I.car + '</button>' +
-          '<button data-act="speed" style="left:60px;top:0" aria-label="Speed">' + I.speed + '</button>' +
-          '<button data-act="rotate" style="left:0;top:60px" aria-label="Rotate">' + I.rotate + '</button>';
+          '<button data-act="move" style="left:0;top:-60px" aria-label="' + t('sketch.move') + '">' + I.move + '</button>' +
+          '<button data-act="car" style="left:-60px;top:0" aria-label="' + t('sketch.type') + '">' + I.car + '</button>' +
+          '<button data-act="speed" style="left:60px;top:0" aria-label="' + t('sketch.speed') + '">' + I.speed + '</button>' +
+          '<button data-act="rotate" style="left:0;top:60px" aria-label="' + t('sketch.rotate') + '">' + I.rotate + '</button>';
 
         function vehSVG(k, v) {
           var h = v.van ? 68 : 54, w = 28, len = [10, 22, 38][v.spd], top = 70 - h / 2;
@@ -301,10 +342,10 @@
           var addBtn = root.querySelector('#add'), row = addBtn.parentNode, menu = null;
           var ic = function (p) { return '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' + p + '</svg>'; };
           var items = [
-            ['Draw line', ic('<path d="M4 19L19 4"/><circle cx="4" cy="19" r="1.6"/><circle cx="19" cy="4" r="1.6"/>')],
-            ['Draw shape', ic('<rect x="3.5" y="3.5" width="9" height="9" rx="1.5"/><circle cx="16" cy="16" r="5"/>')],
-            ['Add icon', ic('<path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.100L12 17l-5.400 2.900 1-6.100L3.200 9.500l6.100-.9z"/>')],
-            ['Free-hand', ic('<path d="M3 17c3-8 5-9 6-6s2 5 4 2 3-8 8-5"/>')]
+            [t('sketch.menu.line'), ic('<path d="M4 19L19 4"/><circle cx="4" cy="19" r="1.6"/><circle cx="19" cy="4" r="1.6"/>')],
+            [t('sketch.menu.shape'), ic('<rect x="3.5" y="3.5" width="9" height="9" rx="1.5"/><circle cx="16" cy="16" r="5"/>')],
+            [t('sketch.menu.icon'), ic('<path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.100L12 17l-5.400 2.900 1-6.100L3.200 9.500l6.100-.9z"/>')],
+            [t('sketch.menu.free'), ic('<path d="M3 17c3-8 5-9 6-6s2 5 4 2 3-8 8-5"/>')]
           ];
           function close() { if (menu) { menu.remove(); menu = null; addBtn.setAttribute('aria-expanded', 'false'); document.removeEventListener('click', outside, true); } }
           function outside(e) { if (menu && !menu.contains(e.target) && !addBtn.contains(e.target)) close(); }
@@ -319,7 +360,7 @@
           });
           var pc = cleanup; cleanup = function () { document.removeEventListener('click', outside, true); if (pc) pc(); };
         })();
-        root.querySelector('#edit').addEventListener('click', function () { toast('Not available in this prototype'); });
+        root.querySelector('#edit').addEventListener('click', function () { toast(t('common.notAvailable')); });
 
         var drag = null;
         function clamp(n, a, b) { return Math.max(a, Math.min(b, n)); }
@@ -367,25 +408,25 @@
   function detailsScreen() {
     var d = state.details || (state.details = { text: '', vehicles: '1', damage: '', witnesses: [] });
     var vehicles = ['1', '2', '3', '4', '5 or more'];
-    function opts(list, cur) { return list.map(function (o) { return '<option' + (o === cur ? ' selected' : '') + '>' + o + '</option>'; }).join(''); }
+    function opts(list, cur) { return list.map(function (o) { return '<option value="' + o + '"' + (o === cur ? ' selected' : '') + '>' + vehLabel(o) + '</option>'; }).join(''); }
     return {
-      bar: { title: 'Accident details', back: true, step: 2 }, next: 'photos', cta: 'Next',
+      bar: { title: t('details.title'), back: true, step: 2 }, next: 'photos', cta: t('common.next'),
       html:
-        '<p class="intro">Fill in the details of your accident:</p>' +
+        '<p class="intro">' + t('details.intro') + '</p>' +
         '<div class="card form">' +
-          '<textarea class="ta" id="txt" placeholder="Describe the accident"></textarea>' +
+          '<textarea class="ta" id="txt" placeholder="' + t('details.describe') + '"></textarea>' +
         '</div>' +
         '<div class="card form vehq">' +
-          '<label class="sel"><span>How many other vehicles?</span><select id="veh">' + opts(vehicles, d.vehicles) + '</select></label>' +
+          '<label class="sel"><span>' + t('details.vehicles') + '</span><select id="veh">' + opts(vehicles, d.vehicles) + '</select></label>' +
         '</div>' +
-        '<div class="card dmgmap"><p>Tap on the area damaged in the accident</p>' +
-          '<svg id="car" viewBox="0 0 220 123" fill="none" role="group" aria-label="Damaged area of the vehicle">' +
+        '<div class="card dmgmap"><p>' + t('details.map.prompt') + '</p>' +
+          '<svg id="car" viewBox="0 0 220 123" fill="none" role="group" aria-label="' + t('details.map.aria') + '">' +
             '<defs><clipPath id="carclip"><path d="M215.887 61.9813C215.887 61.9813 216.287 72.6483 213.491 84.3084C210.698 95.9684 198.271 97.8231 191.626 99.1523C184.98 100.485 177.851 101.053 168.611 101.328C159.374 101.603 147.586 101.199 142.513 101.224C137.441 101.248 131.611 101.514 114.384 101.74C97.1537 101.966 63.7472 102.015 63.7472 102.015C63.7472 102.015 60.3372 102.504 57.8317 102.63C55.3292 102.755 30.5883 102.568 28.3241 102.379C26.063 102.186 22.4086 101.102 18.583 99.4854C14.7605 97.872 7.42105 87.4922 5.94827 85.3839C4.47549 83.2756 3.62604 80.22 3.00882 76.1255C2.39159 72.0311 2.39159 51.238 3.00882 47.1435C3.62604 43.0491 4.47549 39.9935 5.94827 37.8852C7.42105 35.7768 14.7605 25.4002 18.583 23.7838C22.4086 22.1705 26.063 21.0827 28.3241 20.8932C30.5883 20.7007 55.3292 20.5143 57.8317 20.6396C60.3372 20.7649 63.7472 21.2538 63.7472 21.2538C63.7472 21.2538 97.1537 21.3057 114.384 21.5318C131.611 21.7579 137.441 22.0207 142.513 22.0452C147.586 22.0727 159.374 21.6693 168.611 21.9443C177.851 22.2163 184.98 22.7876 191.626 24.1168C198.271 25.446 210.698 27.3038 213.491 38.9607C216.287 50.6208 215.887 61.2878 215.887 61.2878"/></clipPath></defs>' +
             '<path d="M72.2267 21.2748C71.8478 21.0181 71.5116 20.4803 71.4566 19.8142C71.3741 18.8364 71.6949 18.2406 72.3641 16.8167C73.0333 15.3897 75.7955 12.7681 77.3691 12.2426C78.9397 11.7139 80.3329 11.888 80.3085 12.5633C80.2841 13.2386 80.3452 14.5128 79.6791 16.3033C79.0099 18.0939 78.0047 20.8898 76.8497 21.0426C76.2539 21.122 75.3311 21.2076 74.503 21.2809C85.7872 21.3145 103.384 21.3879 114.384 21.5315C131.611 21.7576 137.441 22.0203 142.517 22.0478C147.589 22.0722 159.374 21.6689 168.614 21.9439C177.851 22.2189 184.983 22.7873 191.629 24.1164C198.275 25.4486 210.702 27.3034 213.494 38.9634C216.287 50.6235 215.89 61.2874 215.89 61.2874L215.89 61.984C215.89 61.984 216.287 72.6479 213.494 84.308C210.702 95.968 198.275 97.8258 191.629 99.155C184.983 100.484 177.851 101.056 168.614 101.327C159.374 101.602 147.589 101.199 142.517 101.224C137.441 101.251 131.611 101.514 114.384 101.74C103.213 101.887 85.2341 101.96 73.9743 101.994C74.9002 102.073 76.0858 102.177 76.7977 102.272C77.9405 102.424 78.9366 105.193 79.5966 106.965C80.2597 108.74 80.1955 109.999 80.2199 110.668C80.2474 111.338 78.8695 111.509 77.3111 110.986C75.7528 110.464 73.018 107.869 72.355 106.458C71.6919 105.046 71.3772 104.456 71.4566 103.488C71.5147 102.785 71.8875 102.229 72.2908 101.997C67.1269 102.012 63.7474 102.018 63.7474 102.018C63.7474 102.018 60.3374 102.507 57.8349 102.632C55.3293 102.757 30.5885 102.571 28.3274 102.379C26.0663 102.186 22.4088 101.101 18.5863 99.488C14.7638 97.8716 7.42433 87.4949 5.95155 85.3866C4.47572 83.2752 3.62616 80.2196 3.01199 76.1282C2.39477 72.0338 2.39477 51.2407 3.01199 47.1463C3.62616 43.0518 4.47571 39.9962 5.95155 37.8879C7.42433 35.7796 14.7638 25.3998 18.5863 23.7864C22.4088 22.17 26.0663 21.0853 28.3274 20.8928C30.5885 20.7034 55.3293 20.5139 57.8349 20.6423C60.3374 20.7676 63.7474 21.2534 63.7474 21.2534C63.7474 21.2534 67.0994 21.2595 72.2267 21.2748Z" fill-rule="evenodd" clip-rule="evenodd" fill="#2C2C2E"/><path d="M160.286 36.473L195.086 34.5559C195.086 34.5559 200.105 46.0868 200.105 61.939C200.105 77.7882 195.086 89.3662 195.086 89.3662L160.286 87.4491C160.286 87.4491 163.664 76.9365 163.664 61.9611C163.664 46.9857 160.286 36.473 160.286 36.473Z" fill-rule="evenodd" clip-rule="evenodd" fill="#48484A"/><path d="M90.3532 89.98C90.3532 89.98 85.5322 77.9714 85.5322 61.9368C85.5322 45.8991 90.2182 33.9094 90.2182 33.9094L58.7745 26.6338C58.7745 26.6338 47.7715 32.954 47.7715 61.9589C47.7715 90.9669 58.7745 97.287 58.7745 97.287L90.3532 89.98Z" fill-rule="evenodd" clip-rule="evenodd" fill="#48484A"/><path d="M64.3352 20.4285C64.3352 20.4285 93.3212 28.6784 113.655 29.1498C133.989 29.6212 151.127 30.5546 159.455 26.6355C167.786 22.7133 169.44 21.1011 169.44 21.1011L117.757 20.7491L64.3352 20.4285Z" fill-rule="evenodd" clip-rule="evenodd" fill="#48484A"/><path d="M64.3352 104.168C64.3352 104.168 93.3212 95.9178 113.655 95.4464C133.989 94.975 151.127 94.0416 159.455 97.9607C167.786 101.883 169.44 103.495 169.44 103.495L117.757 103.847L64.3352 104.168Z" fill-rule="evenodd" clip-rule="evenodd" fill="#48484A"/><path d="M9.18447 83.0765C8.25253 81.3409 11.5739 79.0247 11.5739 79.0247C11.5739 79.0247 14.113 82.6151 15.5216 84.5645C18.5802 88.7965 24.1904 93.2453 25.7579 94.3973C27.6248 95.7692 30.1732 98.1404 30.1732 98.1404C30.1732 98.1404 24.3676 97.5414 22.0179 96.2764C19.3443 94.8403 16.7286 92.6984 13.9541 89.3556C11.1827 86.0098 9.92392 84.4576 9.18447 83.0765ZM208.722 80.7206C208.914 78.7558 204.96 78.3067 204.96 78.3067C204.96 78.3067 203.992 82.5967 203.439 84.9372C202.268 89.8811 198.95 95.9404 197.844 97.7982C197.813 97.8501 201.926 96.6309 203.818 95.6959C204.942 93.9725 205.935 91.962 206.772 89.2425C208.049 85.0931 208.566 82.2789 208.722 80.7206ZM208.722 42.5353C208.914 44.5 204.96 44.9491 204.96 44.9491C204.96 44.9491 203.992 40.6591 203.439 38.3186C202.268 33.3747 198.95 27.3154 197.844 25.4577C197.813 25.4057 201.926 26.6249 203.818 27.5599C204.942 29.2833 205.935 31.2938 206.772 34.0133C208.049 38.1658 208.566 40.98 208.722 42.5353ZM9.18447 40.8944C8.25253 42.633 11.5739 44.9491 11.5739 44.9491C11.5739 44.9491 14.113 41.3588 15.5216 39.4094C18.5802 35.1774 24.1904 30.7255 25.7579 29.5766C27.6248 28.2047 30.1732 25.8336 30.1732 25.8336C30.1732 25.8336 24.3676 26.4325 22.0179 27.6944C19.3442 29.1336 16.7286 31.2755 13.9541 34.6183C11.1827 37.9641 9.92392 39.5163 9.18447 40.8944Z" fill-rule="evenodd" clip-rule="evenodd" fill="white"/><path d="M215.887 61.9813C215.887 61.9813 216.287 72.6483 213.491 84.3084C210.698 95.9684 198.271 97.8231 191.626 99.1523C184.98 100.485 177.851 101.053 168.611 101.328C159.374 101.603 147.586 101.199 142.513 101.224C137.441 101.248 131.611 101.514 114.384 101.74C97.1537 101.966 63.7472 102.015 63.7472 102.015C63.7472 102.015 60.3372 102.504 57.8317 102.63C55.3292 102.755 30.5883 102.568 28.3241 102.379C26.063 102.186 22.4086 101.102 18.583 99.4854C14.7605 97.872 7.42105 87.4922 5.94827 85.3839C4.47549 83.2756 3.62604 80.22 3.00882 76.1255C2.39159 72.0311 2.39159 51.238 3.00882 47.1435C3.62604 43.0491 4.47549 39.9935 5.94827 37.8852C7.42105 35.7768 14.7605 25.4002 18.583 23.7838C22.4086 22.1705 26.063 21.0827 28.3241 20.8932C30.5883 20.7007 55.3292 20.5143 57.8317 20.6396C60.3372 20.7649 63.7472 21.2538 63.7472 21.2538C63.7472 21.2538 97.1537 21.3057 114.384 21.5318C131.611 21.7579 137.441 22.0207 142.513 22.0452C147.586 22.0727 159.374 21.6693 168.611 21.9443C177.851 22.2163 184.98 22.7876 191.626 24.1168C198.271 25.446 210.698 27.3038 213.491 38.9607C216.287 50.6208 215.887 61.2878 215.887 61.2878" stroke-width="2.75" stroke-miterlimit="1.5" stroke-linecap="round" stroke-linejoin="round" stroke="#636366"/><path d="M194.195 34.9917C194.195 34.9917 199.014 45.02 199.072 61.6362C199.142 80.7946 194.195 88.2776 194.195 88.2776" stroke-width="2.75" stroke-miterlimit="1.5" stroke-linecap="round" stroke-linejoin="round" stroke="#636366"/><path d="M160.358 36.8525C160.358 36.8525 163.643 46.9817 163.643 61.6362C163.643 76.2876 160.358 86.4168 160.358 86.4168" stroke-width="2.75" stroke-miterlimit="1.5" stroke-linecap="round" stroke-linejoin="round" stroke="#636366"/><path d="M90.3093 88.904C89.1604 86.0043 87.822 79.829 86.8901 75.2365C86.4959 73.3023 85.7534 67.4692 85.7534 61.6361C85.7534 55.8 86.4959 49.9669 86.8901 48.0328C87.822 43.4402 89.1604 37.265 90.3093 34.3652" stroke-width="2.75" stroke-miterlimit="1.5" stroke-linecap="round" stroke-linejoin="round" stroke="#636366"/><path d="M59.7383 27.2886C59.7383 27.2886 85.9703 33.5036 90.3519 34.3744C94.7336 35.2422 99.4147 35.7159 103.784 36.1497C108.157 36.5806 129.918 37.705 142.028 37.5155C154.137 37.3292 176.265 36.0367 184.255 35.4775C190.186 35.062 192.035 35.0314 194.195 34.9917" stroke-width="2.75" stroke-miterlimit="1.5" stroke-linecap="round" stroke-linejoin="round" stroke="#636366"/><path d="M59.7383 95.9846C59.7383 95.9846 85.9703 89.7696 90.3519 88.8988C94.7336 88.031 99.4147 87.5574 103.784 87.1235C108.157 86.6926 129.918 85.5682 142.028 85.7577C154.137 85.944 176.265 87.2365 184.255 87.7957C190.186 88.2112 192.035 88.2418 194.195 88.2815" stroke-width="2.75" stroke-miterlimit="1.5" stroke-linecap="round" stroke-linejoin="round" stroke="#636366"/><path d="M169.027 21.9567C169.027 21.9567 158.739 29.8308 138.929 30.225C127.159 30.4572 101.025 29.6689 92.2282 27.7805C83.4312 25.8953 65.1467 21.2661 65.1467 21.2661" stroke-width="2.75" stroke-miterlimit="1.5" stroke-linecap="round" stroke-linejoin="round" stroke="#636366"/><path d="M169.027 101.332C169.027 101.332 158.739 93.4575 138.929 93.0633C127.159 92.8311 101.025 93.6195 92.2282 95.5078C83.4312 97.3931 65.1467 102.022 65.1467 102.022" stroke-width="2.75" stroke-miterlimit="1.5" stroke-linecap="round" stroke-linejoin="round" stroke="#636366"/><path d="M115.713 21.7979L119.065 29.9806" stroke-width="2.75" stroke-miterlimit="1.5" stroke-linecap="round" stroke-linejoin="round" stroke="#636366"/><path d="M115.713 101.491L119.065 93.308" stroke-width="2.75" stroke-miterlimit="1.5" stroke-linecap="round" stroke-linejoin="round" stroke="#636366"/><path d="M72.3604 16.8151C73.03 15.3896 75.7916 12.7668 77.3652 12.2392C78.9388 11.7116 80.3304 11.8874 80.3057 12.5632C80.2811 13.2389 80.3428 14.5102 79.6763 16.3029C79.0098 18.0925 78.0008 20.888 76.8468 21.0423C75.6928 21.1935 73.2953 21.3756 72.7554 21.4311C72.2154 21.4867 71.5335 20.7893 71.4533 19.8112C71.373 18.8361 71.6939 18.2406 72.3604 16.8151Z" stroke-width="2.75" stroke-miterlimit="1.5" stroke-linecap="round" stroke-linejoin="round" stroke="#636366"/><path d="M72.3517 106.458C73.0148 107.87 75.7495 110.467 77.3078 110.99C78.8662 111.512 80.2442 111.338 80.2198 110.669C80.1953 110 80.2564 108.741 79.5964 106.965C78.9364 105.193 77.9373 102.425 76.7945 102.272C75.6517 102.122 73.2775 101.942 72.7428 101.887C72.2081 101.832 71.5328 102.523 71.4534 103.491C71.3739 104.457 71.6917 105.047 72.3517 106.458Z" stroke-width="2.75" stroke-miterlimit="1.5" stroke-linecap="round" stroke-linejoin="round" stroke="#636366"/><path d="M59.7383 95.9807C59.7383 95.9807 56.0838 92.5279 54.6233 90.0162C53.1627 87.5015 51.7083 82.7043 50.6572 78.4051C50.1316 76.257 49.0408 68.9451 49.0408 61.6362C49.0408 54.3242 50.1316 47.0122 50.6572 44.8642C51.7083 40.565 53.1627 35.7678 54.6233 33.2561C56.0838 30.7414 59.7383 27.2886 59.7383 27.2886" stroke-width="2.75" stroke-miterlimit="1.5" stroke-linecap="round" stroke-linejoin="round" stroke="#636366"/>' +
             '<g clip-path="url(#carclip)" id="hl"></g><g id="mk"></g><g id="hit"></g>' +
           '</svg><small id="dcap"></small></div>' +
-        '<div class="card wit"><small>Witnesses</small><div id="wl"></div>' +
-          '<button class="btn2 icon" id="addw">' + I.plusc + ' Add a witness</button></div>',
+        '<div class="card wit"><small>' + t('details.witnesses') + '</small><div id="wl"></div>' +
+          '<button class="btn2 icon" id="addw">' + I.plusc + ' ' + t('details.witness.add') + '</button></div>',
       init: function (root) {
         var txt = root.querySelector('#txt'), wl = root.querySelector('#wl');
         txt.value = d.text;
@@ -412,7 +453,7 @@
               el('path', { d: 'M' + (cx - 4) + ' ' + cy + 'l3 3 5-6', fill: 'none', stroke: '#000', 'stroke-width': 2, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }, mk);
             });
             hit.querySelectorAll('[role=button]').forEach(function (g) { g.setAttribute('aria-pressed', sel.indexOf(g.dataset.z) > -1); });
-            cap.textContent = sel.length ? d.damage : 'No area selected';
+            cap.textContent = sel.length ? dmg(d.damage) : t('details.map.none');
             cap.classList.toggle('none', !sel.length);
           }
           function toggle(z) {
@@ -422,7 +463,7 @@
             d.zones = sel.slice(); d.damage = sel.length ? zonesToDamage(sel) : ''; save(); paint();
           }
           ZONE_ORDER.forEach(function (z) {
-            var r = Z[z], g = el('g', { role: 'button', tabindex: 0, 'aria-label': ZONE_NAME[z], 'data-z': z, style: 'cursor:pointer;outline:none' }, hit);
+            var r = Z[z], g = el('g', { role: 'button', tabindex: 0, 'aria-label': t('zone.' + z), 'data-z': z, style: 'cursor:pointer;outline:none' }, hit);
             el('rect', { x: r[0], y: r[1], width: r[2], height: r[3], fill: 'transparent' }, g);
             g.addEventListener('click', function () { toggle(z); });
             g.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(z); } });
@@ -433,9 +474,9 @@
           wl.innerHTML = '';
           d.witnesses.forEach(function (w, i) {
             var el = document.createElement('div'); el.className = 'wi';
-            el.innerHTML = '<input class="field" placeholder="Witness name" aria-label="Witness name">' +
-              '<input class="field" type="tel" placeholder="Phone or email" aria-label="Witness contact">' +
-              '<button class="link" type="button">Remove</button>';
+            el.innerHTML = '<input class="field" placeholder="' + t('details.witness.name') + '" aria-label="' + t('details.witness.name') + '">' +
+              '<input class="field" type="tel" placeholder="' + t('details.witness.contact') + '" aria-label="' + t('details.witness.contact') + '">' +
+              '<button class="link" type="button">' + t('details.witness.remove') + '</button>';
             var f = el.querySelectorAll('input');
             f[0].value = w.name || ''; f[1].value = w.contact || '';
             f[0].addEventListener('input', function () { w.name = f[0].value; save(); });
@@ -492,12 +533,12 @@
     var el = document.createElement('div'); el.className = 'cam';
     el.innerHTML =
       (USE_REAL_CAMERA ? '<video playsinline muted autoplay></video>' : '') +
-      '<div class="cam-fallback">Camera preview</div><div class="cam-feed"><img alt=""></div>' +
-      '<div class="cam-top"><button class="cam-x" aria-label="Close">' + I.left + '</button><span>' + opts.title + '</span><i></i></div>' +
+      '<div class="cam-fallback">' + t('cam.preview') + '</div><div class="cam-feed"><img alt=""></div>' +
+      '<div class="cam-top"><button class="cam-x" aria-label="' + t('common.close') + '">' + I.left + '</button><span>' + opts.title + '</span><i></i></div>' +
       '<div class="cam-guide ' + (landscape ? 'g-doc' : 'g-veh') + '"></div>' +
       '<p class="cam-hint">' + opts.hint + '</p>' +
-      '<div class="cam-bot"><button class="cam-shutter" aria-label="Take picture"></button></div>' +
-      '<img class="cam-shot" alt="" hidden><div class="cam-busy" hidden><span class="spin big"></span><p>Analysing picture</p></div><div class="cam-flash"></div>';
+      '<div class="cam-bot"><button class="cam-shutter" aria-label="' + t('cam.shutter') + '"></button></div>' +
+      '<img class="cam-shot" alt="" hidden><div class="cam-busy" hidden><span class="spin big"></span><p>' + t('cam.analysing') + '</p></div><div class="cam-flash"></div>';
     app.appendChild(el);
     var video = el.querySelector('video'), stream = null, closed = false, busy = false, raf = 0, onOri = null;
     var pre = resolveImg(opts.src, opts.label, landscape);
@@ -564,11 +605,7 @@
   }
 
   /* Which vehicle angles are photographed for each "Type of damage" (edit freely) */
-  var ANGLES = {
-    'front': 'Vehicle front side', 'front-left': 'Vehicle front left corner', 'front-right': 'Vehicle front right corner',
-    'left': 'Vehicle driver side', 'right': 'Vehicle passenger side',
-    'back': 'Vehicle back side', 'back-left': 'Vehicle back left corner', 'back-right': 'Vehicle back right corner'
-  };
+  function angleName(a) { return t('angle.' + a); }
   var DAMAGE_ANGLES = {
     'Front damage': ['front'],
     'Front left damage': ['front-left'],
@@ -583,10 +620,14 @@
     'Other damage': ['front', 'back', 'left', 'right']
   };
   var DEFAULT_DAMAGE = 'Rear and side damage';
+  /* The stored damage value stays English; this maps it to the translated label */
+  var DMG_KEY = { 'Front damage': 'front', 'Front left damage': 'frontLeft', 'Front right damage': 'frontRight', 'Left side damage': 'left', 'Right side damage': 'right',
+    'Rear damage': 'rear', 'Rear left damage': 'rearLeft', 'Rear right damage': 'rearRight', 'Front and side damage': 'frontSide', 'Rear and side damage': 'rearSide', 'Other damage': 'other' };
+  function dmg(v) { return DMG_KEY[v] ? t('damage.' + DMG_KEY[v]) : (v || ''); }
+  function vehLabel(v) { return v === '5 or more' ? t('details.vehicles5') : v; }
   /* Tap zones on the vehicle drawing (screen 5) -> damage value / photo angle */
   var ZONE_ORDER = ['F', 'FR', 'R', 'BR', 'B', 'BL', 'L', 'FL'];
   var ZONE_ANGLE = { F: 'front', FR: 'front-right', R: 'right', BR: 'back-right', B: 'back', BL: 'back-left', L: 'left', FL: 'front-left' };
-  var ZONE_NAME = { F: 'Front', FR: 'Front right corner', R: 'Right side', BR: 'Rear right corner', B: 'Rear', BL: 'Rear left corner', L: 'Left side', FL: 'Front left corner' };
   var DAMAGE_ZONES = {
     'Front damage': ['F'], 'Front left damage': ['FL'], 'Front right damage': ['FR'],
     'Left side damage': ['L'], 'Right side damage': ['R'],
@@ -624,20 +665,20 @@
 
   function photosScreen() {
     return {
-      bar: { title: 'Photos', back: true, step: 3 }, next: 'sketch', cta: 'Next',
+      bar: { title: t('photos.title'), back: true, step: 3 }, next: 'sketch', cta: t('common.next'),
       html:
-        '<p class="intro">Take photos of the damage on your vehicle:</p>' +
+        '<p class="intro">' + t('photos.intro') + '</p>' +
         '<div class="stack" id="pc"></div>' +
-        '<button class="btn2 add" id="addp">' + I.plus + ' Add photo</button>' +
-        '<div class="note" id="est" hidden>' + I.info + '<p>Based on your photos, we estimate the damage at 160 000 – 190 000 CZK. If there are additional damages, the total may exceed the legal threshold – in that case, you will be required to call the police.</p></div>' +
+        '<button class="btn2 add" id="addp">' + I.plus + ' ' + t('photos.add') + '</button>' +
+        '<div class="note" id="est" hidden>' + I.info + '<p>' + t('photos.estimate') + '</p></div>' +
         '',
       init: function (root) {
         var pc = root.querySelector('#pc');
         function cards() {
           var list = damageAngles(state.details).map(function (a, n) {
-            return { key: a, label: ANGLES[a], img: 'assets/illustrations/' + a + '.svg', src: DEMO_PHOTOS[n % DEMO_PHOTOS.length], req: true };
+            return { key: a, label: angleName(a), img: 'assets/illustrations/' + a + '.svg', src: DEMO_PHOTOS[n % DEMO_PHOTOS.length], req: true };
           });
-          for (var k = 0; k < (state.extraPhotos || 0); k++) list.push({ key: 'x' + (k + 1), label: 'Additional photo ' + (k + 1), ill: 'generic', src: DEMO_PHOTOS[(list.length) % DEMO_PHOTOS.length] });
+          for (var k = 0; k < (state.extraPhotos || 0); k++) list.push({ key: 'x' + (k + 1), label: t('photos.extra', { n: k + 1 }), ill: 'generic', src: DEMO_PHOTOS[(list.length) % DEMO_PHOTOS.length] });
           return list;
         }
         function draw() {
@@ -648,9 +689,9 @@
             var has = !!photoUrls[c.key];
             b.innerHTML = '<span class="pl">' + c.label + '</span><span class="prow"><span class="pill">' +
               (has ? '<img alt="" src="' + photoUrls[c.key] + '">' : c.img ? '<img class="ill" alt="" src="' + c.img + '">' : ILL[c.ill]) + '</span><span class="ptxt">' +
-              (has ? 'Retake photo' : 'Take a photo') + '</span></span><span class="pcam">' + (has ? I.checkc : I.camera) + '</span>';
+              (has ? t('photos.retake') : t('photos.take')) + '</span></span><span class="pcam">' + (has ? I.checkc : I.camera) + '</span>';
             b.addEventListener('click', function () {
-              openCamera({ title: c.label, hint: 'Take a photo of the damage', shape: 'vehicle', src: c.src, label: c.label,
+              openCamera({ title: c.label, hint: t('cam.hint.vehicle'), shape: 'vehicle', src: c.src, label: c.label,
                 onDone: function (url) { photoUrls[c.key] = url; draw(); } });
             });
             pc.appendChild(b);
@@ -665,13 +706,13 @@
 
   /* ---------- Driver information (scan documents) ---------- */
   var DOC_DEF = {
-    contacts: { title: 'Contacts', fields: [
-      ['name', 'Name and Surname', 'Jan Dvořák', 0, 0], ['tel', 'Telephone', '+420 603 123 456', 0, 0], ['email', 'Email', 'Jan.Dvorak@email.com', 0, 0]] },
-    licence: { title: 'Your driver’s licence', fields: [
-      ['no', 'Driver’s licence number', '1234 7894 897645', 0, 0], ['valid', 'Valid until', '26/10/2032', 0, 0]] },
-    green: { title: 'Vehicle green card', fields: [
-      ['holder', 'Policyholder', 'Jan Dvořák\nVinohradská 142\nPrague 2', 1, 0], ['plate', 'Vehicle plate', '2UL 8462', 0, 1],
-      ['model', 'Make and model', 'Škoda Octavia', 0, 1], ['insurer', 'Insurer', 'Generali Česká pojišťovna\n877920-84\nGC: CZ/837/12', 1, 1]] }
+    contacts: { title: 'docs.contacts', fields: [
+      ['name', 'docs.f.name', 'Jan Dvořák', 0, 0], ['tel', 'docs.f.tel', '+420 603 123 456', 0, 0], ['email', 'docs.f.email', 'Jan.Dvorak@email.com', 0, 0]] },
+    licence: { title: 'docs.licence', fields: [
+      ['no', 'docs.f.no', '1234 7894 897645', 0, 0], ['valid', 'docs.f.valid', '26/10/2032', 0, 0]] },
+    green: { title: 'docs.green', fields: [
+      ['holder', 'docs.f.holder', 'Jan Dvořák\nVinohradská 142\nPrague 2', 1, 0], ['plate', 'docs.f.plate', '2UL 8462', 0, 1],
+      ['model', 'docs.f.model', 'Škoda Octavia', 0, 1], ['insurer', 'docs.f.insurer', 'Generali Česká pojišťovna\n877920-84\nGC: CZ/837/12', 1, 1]] }
   };
   var DOC_KEYS = ['contacts', 'licence', 'green'];
 
@@ -682,15 +723,15 @@
   var G_LOGO = '<svg width="20" height="20" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.5 12.2c0-.8-.1-1.5-.2-2.2H12v4.2h5.9a5 5 0 01-2.2 3.3v2.7h3.5c2.1-1.9 3.3-4.7 3.3-8z"/><path fill="#34A853" d="M12 23c3 0 5.5-1 7.3-2.7l-3.5-2.7c-1 .7-2.2 1.1-3.8 1.1-2.9 0-5.4-2-6.3-4.6H2.1v2.8A11 11 0 0012 23z"/><path fill="#FBBC05" d="M5.7 14.1a6.6 6.6 0 010-4.2V7.1H2.1a11 11 0 000 9.8z"/><path fill="#EA4335" d="M12 5.4c1.6 0 3.1.6 4.3 1.7l3.2-3.2A11 11 0 002.1 7.1l3.6 2.8C6.6 7.4 9.1 5.4 12 5.4z"/></svg>';
   var A_LOGO = '<svg width="20" height="20" viewBox="0 0 24 24" fill="#fff"><path d="M16.4 12.6c0-2.4 2-3.5 2.1-3.6-1.1-1.700-2.900-1.900-3.500-1.900-1.500-.2-2.900.9-3.700.9s-1.900-.9-3.200-.8c-1.600 0-3.100 1-4 2.400-1.700 3-.4 7.300 1.200 9.700.8 1.200 1.800 2.500 3 2.400 1.200 0 1.700-.8 3.100-.8s1.900.8 3.200.8 2.100-1.200 2.900-2.300c.9-1.300 1.300-2.600 1.300-2.700 0 0-2.400-.9-2.400-3.700zM14 5.500c.7-.8 1.100-1.900 1-3-1 0-2.100.7-2.800 1.500-.6.700-1.200 1.800-1 2.900 1.100.1 2.100-.5 2.800-1.400z"/></svg>';
   function openLogin(onSuccess) {
-    var m = document.createElement('div'); m.className = 'modal-bg'; m.setAttribute('role', 'dialog'); m.setAttribute('aria-modal', 'true'); m.setAttribute('aria-label', 'Log in');
-    m.innerHTML = '<div class="modal login"><button class="mx" aria-label="Close">' + I.xmark.replace('class="oi"', 'width="20" height="20"') + '</button>' +
-      '<h2>Log in</h2><p class="lsub">Use your account to fill in your contact details.</p>' +
-      '<label class="ef"><span>Email</span><input type="email" value="jan.dvorak@email.com" autocomplete="off"></label>' +
-      '<label class="ef"><span>Password</span><input type="password" value="password123" autocomplete="off"></label>' +
-      '<button class="btn on go">Log in</button>' +
-      '<div class="or"><span>or</span></div>' +
-      '<button class="btn2 soc go">' + G_LOGO + ' Continue with Google</button>' +
-      '<button class="btn2 soc go">' + A_LOGO + ' Continue with Apple</button></div>';
+    var m = document.createElement('div'); m.className = 'modal-bg'; m.setAttribute('role', 'dialog'); m.setAttribute('aria-modal', 'true'); m.setAttribute('aria-label', t('login.title'));
+    m.innerHTML = '<div class="modal login"><button class="mx" aria-label="' + t('common.close') + '">' + I.xmark.replace('class="oi"', 'width="20" height="20"') + '</button>' +
+      '<h2>' + t('login.title') + '</h2><p class="lsub">' + t('login.sub') + '</p>' +
+      '<label class="ef"><span>' + t('login.email') + '</span><input type="email" value="jan.dvorak@email.com" autocomplete="off"></label>' +
+      '<label class="ef"><span>' + t('login.password') + '</span><input type="password" value="password123" autocomplete="off"></label>' +
+      '<button class="btn on go">' + t('login.submit') + '</button>' +
+      '<div class="or"><span>' + t('login.or') + '</span></div>' +
+      '<button class="btn2 soc go">' + G_LOGO + ' ' + t('login.google') + '</button>' +
+      '<button class="btn2 soc go">' + A_LOGO + ' ' + t('login.apple') + '</button></div>';
     app.appendChild(m);
     function close() { m.remove(); }
     m.querySelector('.mx').addEventListener('click', close);
@@ -704,33 +745,33 @@
     if (filled) DOC_KEYS.forEach(function (k) { state.docs[k] = { mode: 'filled', values: mockValues(k) }; });
     var docsState = state.docs, scanning = {};
     return {
-      bar: { title: 'Driver information', back: true, step: 5 }, next: 'second-party', cta: 'Next',
+      bar: { title: t('docs.title'), back: true, step: 5 }, next: 'second-party', cta: t('common.next'),
       html: '<div class="stack" id="dc"></div>',
       init: function (root) {
         var dc = root.querySelector('#dc'), tok = token;
         function cardHTML(k) {
-          var d = DOC_DEF[k], s = docsState[k], h = '<div class="card dcard"><small class="dl">' + d.title + '</small>';
+          var d = DOC_DEF[k], s = docsState[k], h = '<div class="card dcard"><small class="dl">' + t(d.title) + '</small>';
           if (scanning[k]) {
-            h += '<div class="scanbtn"><span class="spin"></span><b>Scanning…</b></div>';
+            h += '<div class="scanbtn"><span class="spin"></span><b>' + t('docs.scanning') + '</b></div>';
           } else if (s.mode === 'empty') {
             h += k === 'contacts'
-              ? '<div class="cbtns"><button class="btn on" data-k="contacts" data-act="login">Log in</button><button class="btn2" data-k="contacts" data-act="manual">Enter manually</button></div>'
-              : '<button class="scanbtn" data-k="' + k + '" data-act="scan">' + I.camera.replace(/#fff/g, '#6b6b6b') + '<b>Scan document</b></button>';
+              ? '<div class="cbtns"><button class="btn on" data-k="contacts" data-act="login">' + t('docs.login') + '</button><button class="btn2" data-k="contacts" data-act="manual">' + t('docs.manual') + '</button></div>'
+              : '<button class="scanbtn" data-k="' + k + '" data-act="scan">' + I.camera.replace(/#fff/g, '#6b6b6b') + '<b>' + t('docs.scan') + '</b></button>';
           } else if (s.mode === 'edit') {
             d.fields.forEach(function (f) {
               var v = esc(s.values[f[0]] || '');
-              h += '<label class="ef"><span>' + f[1] + '</span>' +
+              h += '<label class="ef"><span>' + t(f[1]) + '</span>' +
                 (f[3] ? '<textarea rows="3" data-f="' + f[0] + '">' + v + '</textarea>' : '<input data-f="' + f[0] + '" value="' + v + '">') + '</label>';
             });
-            h += '<div class="cbtns"><button class="btn on" data-k="' + k + '" data-act="save">Save</button><button class="btn2 ghost" data-k="' + k + '" data-act="cancel">Cancel</button></div>';
+            h += '<div class="cbtns"><button class="btn on" data-k="' + k + '" data-act="save">' + t('docs.save') + '</button><button class="btn2 ghost" data-k="' + k + '" data-act="cancel">' + t('common.cancel') + '</button></div>';
           } else {
             h += '<div class="dl-list">';
             d.fields.forEach(function (f) {
-              h += '<div class="li"><span class="lt">' + f[1] + '</span><span class="lv">' + esc(s.values[f[0]] || '') + '</span>' + (f[4] ? I.chev : '') + '</div>';
+              h += '<div class="li"><span class="lt">' + t(f[1]) + '</span><span class="lv">' + esc(s.values[f[0]] || '') + '</span>' + (f[4] ? I.chev : '') + '</div>';
             });
             h += '</div><div class="acts">' +
-              (k === 'contacts' ? '' : '<button data-k="' + k + '" data-act="scan">' + I.rotate.replace(/width="22" height="22"/, 'width="18" height="18"') + ' Scan again</button>') +
-              '<button data-k="' + k + '" data-act="edit">' + I.pencil + ' Edit</button></div>';
+              (k === 'contacts' ? '' : '<button data-k="' + k + '" data-act="scan">' + I.rotate.replace(/width="22" height="22"/, 'width="18" height="18"') + ' ' + t('docs.again') + '</button>') +
+              '<button data-k="' + k + '" data-act="edit">' + I.pencil + ' ' + t('common.edit') + '</button></div>';
           }
           return h + '</div>';
         }
@@ -752,8 +793,8 @@
             s.values = vals; s.mode = any ? 'filled' : 'empty';
           }
           else if (act === 'scan') {
-            var lab = k === 'licence' ? 'Driver’s licence' : 'Vehicle green card';
-            openCamera({ title: lab, hint: 'Place the document inside the frame', shape: 'document', src: k === 'licence' ? PH_SRC.licence : PH_SRC.green, label: lab,
+            var lab = k === 'licence' ? t('docs.licence.short') : t('docs.green');
+            openCamera({ title: lab, hint: t('cam.hint.doc'), shape: 'document', src: k === 'licence' ? PH_SRC.licence : PH_SRC.green, label: lab,
               analysing: true, hold: 3000,
               onDone: function () {
                 s.mode = 'filled'; s.values = mockValues(k); save();
@@ -773,15 +814,15 @@
 
   function shareScreen() {
     var opts = [
-      ['qr', I.qr, 'Share QR code', 'The other party scans the code and fills in the form in their own browser.', 'waiting'],
-      ['sms', I.mail, 'SMS / Email invitation', 'We send them a link to the same online form.', 'waiting'],
-      ['device', I.phone, 'Use this device', 'Hand over your phone so they can fill in the form themselves.', 'waiting'],
-      ['paper', I.doc, 'Paper form', 'Second driver fills the paper form and you can scan it to your app.', 'waiting'],
-      ['none', I.xmark, 'Can’t or won’t fill in', 'The other party is unable or unwilling to complete the form.', 'sign']
+      ['qr', I.qr, t('share.qr.title'), t('share.qr.text'), 'waiting'],
+      ['sms', I.mail, t('share.sms.title'), t('share.sms.text'), 'waiting'],
+      ['device', I.phone, t('share.device.title'), t('share.device.text'), 'waiting'],
+      ['paper', I.doc, t('share.paper.title'), t('share.paper.text'), 'waiting'],
+      ['none', I.xmark, t('share.none.title'), t('share.none.text'), 'sign']
     ];
     return {
-      bar: { title: 'Share form', back: true, step: 6 },
-      html: '<p class="intro">Choose how the other party will fill in the form:</p><div class="stack">' +
+      bar: { title: t('share.title'), back: true, step: 6 },
+      html: '<p class="intro">' + t('share.intro') + '</p><div class="stack">' +
         opts.map(function (o) {
           return '<a class="opt" href="#' + o[4] + '" data-id="' + o[0] + '">' + o[1] +
             '<div class="txt"><b>' + o[2] + '</b><span>' + o[3] + '</span></div>' + I.right + '</a>';
@@ -796,8 +837,8 @@
 
   function waitingScreen() {
     return {
-      bar: { title: 'Share form', back: true, step: 6 }, fill: true,
-      html: '<div class="center col"><span class="spin big" aria-hidden="true"></span><p>Waiting for the other driver to finish filling the report.</p></div>',
+      bar: { title: t('share.title'), back: true, step: 6 }, fill: true,
+      html: '<div class="center col"><span class="spin big" aria-hidden="true"></span><p>' + t('waiting.text') + '</p></div>',
       init: function () {
         if (!WAIT_MS) return;
         var t = setTimeout(function () { location.hash = 'sign'; }, WAIT_MS);
@@ -809,13 +850,13 @@
   /* ---------- Sign ---------- */
   function signScreen() {
     var opts = [
-      ['bankid', I.bank, 'BankID', 'Log in with BankID and sign document digitally.'],
-      ['sms', I.mail, 'Text message', 'Get a confirmation code via text message.'],
-      ['hand', I.hand, 'Handwritten signature', 'Use your screen to write your signature manually.']
+      ['bankid', I.bank, t('sign.bankid.title'), t('sign.bankid.text')],
+      ['sms', I.mail, t('sign.sms.title'), t('sign.sms.text')],
+      ['hand', I.hand, t('sign.hand.title'), t('sign.hand.text')]
     ];
     return {
-      bar: { title: 'Sign', back: true, step: 7 },
-      html: '<p class="intro">Choose a method of signing the form:</p><div class="stack">' +
+      bar: { title: t('sign.title'), back: true, step: 7 },
+      html: '<p class="intro">' + t('sign.intro') + '</p><div class="stack">' +
         opts.map(function (o) {
           return '<a class="opt" href="#summary" data-id="' + o[0] + '">' + o[1] +
             '<div class="txt"><b>' + o[2] + '</b><span>' + o[3] + '</span></div>' + I.right + '</a>';
@@ -845,24 +886,24 @@
   function summaryScreen() {
     function drv(dot, name, who, veh, plate, ins) {
       return '<div class="sub"><div class="sr"><span class="sl"><i class="dot" style="background:' + dot + '"></i>' + name + '</span><span class="sv">' + who + '</span></div>' +
-        '<div class="sr"><span class="sl">Vehicle</span><span class="sv">' + veh + '<br>' + plate + '</span></div>' +
-        '<div class="sr"><span class="sl">Insurer</span><span class="sv">' + ins + '</span></div></div>';
+        '<div class="sr"><span class="sl">' + t('summary.vehicle') + '</span><span class="sv">' + veh + '<br>' + plate + '</span></div>' +
+        '<div class="sr"><span class="sl">' + t('summary.insurer') + '</span><span class="sv">' + ins + '</span></div></div>';
     }
     return {
-      bar: { title: 'Report ready', back: true, step: 8 },
+      bar: { title: t('summary.title'), back: true, step: 8 },
       html:
-        '<div class="tile"><p class="tp">Download a PDF and send it to your insurance company or simply submit it to them right from the app.</p>' +
-          drv('#30d158', 'Driver A (You)', 'Jan Dvořák', 'Škoda Octavia', '2UL 8462', 'Generali Česká pojišťovna') +
-          drv('#ffd60a', 'Driver B', 'Tomáš Procházka', 'VW Golf', '5AH 6534', 'ČPP') +
-          '<div class="tb"><button class="tbtn" data-t="dl">' + I.dl + ' Download</button><button class="btn on" data-t="send">Send to insurance</button></div></div>' +
-        '<p class="intro sec">Optional services:</p>' +
-        '<a class="svc" href="#services"><span class="simg">' + svcImg('service', CAR_IMG) + '</span><span class="stx"><b>Book a service</b><span>Estimate repair cost:<br>20 000 – 45 000 CZK</span></span>' + I.right + '</a>' +
-        '<button class="svc" data-t="tow"><span class="simg">' + svcImg('tow', TOW_IMG) + '</span><span class="stx"><b>Tow vehicle</b><span>Book a towing service.</span></span>' + I.right + '</button>',
+        '<div class="tile"><p class="tp">' + t('summary.text') + '</p>' +
+          drv('#30d158', t('summary.driverA'), 'Jan Dvořák', 'Škoda Octavia', '2UL 8462', 'Generali Česká pojišťovna') +
+          drv('#ffd60a', t('summary.driverB'), 'Tomáš Procházka', 'VW Golf', '5AH 6534', 'ČPP') +
+          '<div class="tb"><button class="tbtn" data-t="dl">' + I.dl + ' ' + t('summary.download') + '</button><button class="btn on" data-t="send">' + t('summary.send') + '</button></div></div>' +
+        '<p class="intro sec">' + t('summary.optional') + '</p>' +
+        '<a class="svc" href="#services"><span class="simg">' + svcImg('service', CAR_IMG) + '</span><span class="stx"><b>' + t('summary.book.title') + '</b><span>' + t('summary.book.text') + '<br>' + t('summary.book.amount') + '</span></span>' + I.right + '</a>' +
+        '<button class="svc" data-t="tow"><span class="simg">' + svcImg('tow', TOW_IMG) + '</span><span class="stx"><b>' + t('summary.tow.title') + '</b><span>' + t('summary.tow.text') + '</span></span>' + I.right + '</button>',
       init: function (root) {
         function endBar() {
           if (root.querySelector('.controls')) return;
           var c = document.createElement('div'); c.className = 'controls two';
-          c.innerHTML = '<button class="btn2" data-end="restart">Restart prototype</button><a class="btn2" href="#index" data-end="index">Screen overview</a>';
+          c.innerHTML = '<button class="btn2" data-end="restart">' + t('summary.restart') + '</button>';
           root.appendChild(c);
           root.querySelector('[data-end="restart"]').addEventListener('click', function () {
             try { sessionStorage.removeItem('aw'); } catch (e) {}
@@ -871,21 +912,21 @@
         }
         function submitted(btn) {
           state.sent = true; save();
-          btn.textContent = 'Sent to insurance'; btn.disabled = true; btn.classList.add('done');
+          btn.textContent = t('summary.sent'); btn.disabled = true; btn.classList.add('done');
           var m = document.createElement('div'); m.className = 'modal-bg'; m.setAttribute('role', 'dialog'); m.setAttribute('aria-modal', 'true');
-          m.innerHTML = '<div class="modal"><div class="mi">' + I.checkc + '</div><h2>Form submitted</h2>' +
-            '<p>Your accident report was successfully sent to Generali Česká pojišťovna. You will receive a confirmation by email.</p>' +
-            '<button class="btn on">OK</button></div>';
+          m.innerHTML = '<div class="modal"><div class="mi">' + I.checkc + '</div><h2>' + t('summary.modal.title') + '</h2>' +
+            '<p>' + t('summary.modal.text', { insurer: 'Generali Česká pojišťovna' }) + '</p>' +
+            '<button class="btn on">' + t('summary.modal.ok') + '</button></div>';
           root.appendChild(m);
           m.querySelector('button').addEventListener('click', function () { m.remove(); });
           endBar();
         }
-        if (state.sent) { var sb = root.querySelector('[data-t="send"]'); if (sb) { sb.textContent = 'Sent to insurance'; sb.disabled = true; sb.classList.add('done'); } endBar(); }
+        if (state.sent) { var sb = root.querySelector('[data-t="send"]'); if (sb) { sb.textContent = t('summary.sent'); sb.disabled = true; sb.classList.add('done'); } endBar(); }
         root.querySelectorAll('[data-t]').forEach(function (b) {
           b.addEventListener('click', function () {
-            var t = b.dataset.t;
-            if (t === 'send') { submitted(b); return; }
-            toast(t === 'dl' ? 'PDF download is not available in this prototype' : 'Towing is not available in this prototype');
+            var act = b.dataset.t;
+            if (act === 'send') { submitted(b); return; }
+            toast(act === 'dl' ? t('summary.toast.dl') : t('summary.toast.tow'));
           });
         });
       }
@@ -894,33 +935,33 @@
 
   function servicesScreen() {
     var list = [
-      ['AZ World cars', '2,1 km', 'Náměstí svobody, 12, Praha 3, 134 00<br>Mo – Fri: 09:00 – 18:00', [['Cost estimate', '21 000 CZK'], ['Finished in', '2-3 weeks']]],
-      ['Louwman s.r.o.', '2,3 km', 'Dlouhá 76, Praha 10. 10100<br>Mo – Sun: 08:00 – 17:00', [['Cost estimate', '26 000 CZK'], ['Finished in', '~ 1 week'], ['Extras', 'Replacement vehicle']]]
+      ['AZ World cars', '2,1 km', 'Náměstí svobody, 12, Praha 3, 134 00<br>' + t('services.hours.weekdays'), [[t('services.cost'), t('services.s1.cost')], [t('services.finished'), t('services.s1.time')]]],
+      ['Louwman s.r.o.', '2,3 km', 'Dlouhá 76, Praha 10. 10100<br>' + t('services.hours.week'), [[t('services.cost'), t('services.s2.cost')], [t('services.finished'), t('services.s2.time')], [t('services.extras'), t('services.replacement')]]]
     ];
     return {
-      bar: { title: 'Book a service', back: true },
-      html: '<p class="intro rec">Recommended:</p><div class="stack">' + list.map(function (s, i) {
+      bar: { title: t('services.title'), back: true },
+      html: '<p class="intro rec">' + t('services.recommended') + '</p><div class="stack">' + list.map(function (s, i) {
         return '<div class="tile svt"><div class="sh"><b>' + s[0] + '</b><span>' + s[1] + '</span></div><p class="sa">' + s[2] + '</p>' +
           '<div class="sub">' + s[3].map(function (r) { return '<div class="sr"><span class="sl">' + r[0] + '</span><span class="sv">' + r[1] + '</span></div>'; }).join('') + '</div>' +
-          '<a class="btn on bk" href="#consent" data-i="' + i + '">Book</a></div>';
-      }).join('') + '</div><button class="more" id="more">Show more</button>',
+          '<a class="btn on bk" href="#consent" data-i="' + i + '">' + t('services.book') + '</a></div>';
+      }).join('') + '</div><button class="more" id="more">' + t('services.more') + '</button>',
       init: function (root) {
         root.querySelectorAll('a.bk').forEach(function (el) {
           el.addEventListener('click', function () { state.service = list[+el.dataset.i][0]; save(); });
         });
-        root.querySelector('#more').addEventListener('click', function () { toast('No more services in this prototype'); });
+        root.querySelector('#more').addEventListener('click', function () { toast(t('services.nomore')); });
       }
     };
   }
 
   function consentScreen() {
     return {
-      bar: { title: 'Book a service', back: true }, next: 'summary', cta: 'Send booking request', gated: true,
+      bar: { title: t('consent.title'), back: true }, next: 'summary', cta: t('consent.cta'), gated: true,
       html: '<div id="cw"><button class="opt" role="checkbox" aria-checked="false">' + I.empty +
-        '<div class="txt"><b>Agree to share my accident details</b><span>I agree with sharing details of my accident with the vehicle service, including photos, description, vehicle type and insurance details.</span></div></button></div>',
+        '<div class="txt"><b>' + t('consent.agree.title') + '</b><span>' + t('consent.agree.text') + '</span></div></button></div>',
       onNext: function (root, btn) {
-        root.querySelector('#cw').innerHTML = '<div class="center"><p>Your booking request has been sent' + (state.service ? ' to ' + esc(state.service) : '') + '. The service will contact you shortly.</p></div>';
-        btn.textContent = 'Back to report'; btn.onclick = function () { location.hash = 'summary'; };
+        root.querySelector('#cw').innerHTML = '<div class="center"><p>' + (state.service ? t('consent.sentTo', { service: esc(state.service) }) : t('consent.sent')) + '</p></div>';
+        btn.textContent = t('consent.back'); btn.onclick = function () { location.hash = 'summary'; };
         btn.classList.add('on'); btn.disabled = false; state.consent = false; save();
         root.querySelector('.content').classList.add('fill');
       },
@@ -947,12 +988,12 @@
 
   function voiceScreen() {
     return {
-      bar: { title: 'Voice assistant', back: false }, fill: true,
+      bar: { title: t('voice.title'), back: false }, fill: true,
       html:
         '<div class="vc" id="vc">' +
           '<div class="vc-hero" id="hero"><div class="vc-orb">' + I.mic + '</div>' +
-            '<h2>Tell us what happened</h2>' +
-            '<p>I will ask a few short questions about the accident and your vehicle damage. Answer by voice – or type if you prefer.</p></div>' +
+            '<h2>' + t('voice.hero.title') + '</h2>' +
+            '<p>' + t('voice.hero.text') + '</p></div>' +
           '<div class="vc-log" id="log" aria-live="polite"></div>' +
         '</div>',
       init: function (root) {
@@ -979,7 +1020,7 @@
           return new Promise(function (res) {
             try {
               synth.cancel();
-              var u = new SpeechSynthesisUtterance(text.replace(/<[^>]+>/g, '')); u.lang = 'en-US'; u.rate = 1.02;
+              var u = new SpeechSynthesisUtterance(text.replace(/<[^>]+>/g, '')); u.lang = t('voice.lang'); u.rate = 1.02;
               var done = false, fin = function () { if (done) return; done = true; speaking = false; res(); };
               u.onend = fin; u.onerror = fin; speaking = true; synth.speak(u);
               setTimeout(fin, Math.min(15000, 1500 + text.length * 70));
@@ -1003,24 +1044,24 @@
         function micState() {
           var mic = ctrls.querySelector('.vc-mic'); if (!mic) return;
           mic.classList.toggle('on', listening); mic.innerHTML = listening ? I.stop : (ctrls.querySelector('input').value.trim() ? I.send : I.mic);
-          mic.setAttribute('aria-label', listening ? 'Stop listening' : 'Speak');
+          mic.setAttribute('aria-label', listening ? t('voice.mic.stop') : t('voice.mic'));
           ctrls.querySelector('.vc-live').hidden = !listening;
         }
         function chips(list) {
           var c = ctrls.querySelector('.vc-chips'); c.innerHTML = ''; c.hidden = !list || !list.length;
-          (list || []).forEach(function (t) {
-            var b = document.createElement('button'); b.type = 'button'; b.textContent = t;
-            b.addEventListener('click', function () { answer(t); }); c.appendChild(b);
+          (list || []).forEach(function (lbl) {
+            var b = document.createElement('button'); b.type = 'button'; b.textContent = lbl;
+            b.addEventListener('click', function () { answer(lbl); }); c.appendChild(b);
           });
           c.scrollLeft = 0;
         }
         function drawChat() {
           ctrls.innerHTML =
             '<div class="vc-chips" hidden></div>' +
-            '<div class="vc-live" hidden><span class="wave"><i></i><i></i><i></i><i></i><i></i></span><span class="lt" id="lt">Listening…</span></div>' +
-            '<div class="vc-row"><button class="vc-snd" type="button" aria-label="Toggle voice replies">' + (soundOn ? I.spk : I.spkoff) + '</button>' +
-            '<input class="vc-in" type="text" placeholder="Type your answer…" aria-label="Type your answer" autocomplete="off">' +
-            '<button class="vc-mic" type="button" aria-label="Speak">' + I.mic + '</button></div>';
+            '<div class="vc-live" hidden><span class="wave"><i></i><i></i><i></i><i></i><i></i></span><span class="lt" id="lt">' + t('voice.listening') + '</span></div>' +
+            '<div class="vc-row"><button class="vc-snd" type="button" aria-label="' + t('voice.sound') + '">' + (soundOn ? I.spk : I.spkoff) + '</button>' +
+            '<input class="vc-in" type="text" placeholder="' + t('voice.input') + '" aria-label="' + t('voice.input') + '" autocomplete="off">' +
+            '<button class="vc-mic" type="button" aria-label="' + t('voice.mic') + '">' + I.mic + '</button></div>';
           var inp = ctrls.querySelector('input'), mic = ctrls.querySelector('.vc-mic');
           inp.addEventListener('input', micState);
           inp.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); submitTyped(); } });
@@ -1041,20 +1082,20 @@
         /* ----- speech recognition ----- */
         function listen() {
           if (busy) return;
-          if (!SR) { toast('Voice input is not supported in this browser – please type'); ctrls.querySelector('input').focus(); return; }
+          if (!SR) { toast(t('voice.toast.unsupported')); ctrls.querySelector('input').focus(); return; }
           try { if (synth) synth.cancel(); } catch (e) {}
           var finalText = '', got = false;
           try {
-            rec = new SR(); rec.lang = 'en-US'; rec.interimResults = true; rec.continuous = false;
-            rec.onstart = function () { listening = true; micState(); ctrls.querySelector('#lt').textContent = 'Listening…'; };
+            rec = new SR(); rec.lang = t('voice.lang'); rec.interimResults = true; rec.continuous = false;
+            rec.onstart = function () { listening = true; micState(); ctrls.querySelector('#lt').textContent = t('voice.listening'); };
             rec.onresult = function (e) {
-              var t = ''; for (var i = 0; i < e.results.length; i++) t += e.results[i][0].transcript;
-              finalText = t; got = true; micOK = true;
-              ctrls.querySelector('#lt').textContent = t || 'Listening…';
+              var txt = ''; for (var i = 0; i < e.results.length; i++) txt += e.results[i][0].transcript;
+              finalText = txt; got = true; micOK = true;
+              ctrls.querySelector('#lt').textContent = txt || t('voice.listening');
             };
             rec.onerror = function (e) {
               if (e.error === 'not-allowed' || e.error === 'service-not-allowed' || e.error === 'audio-capture' || e.error === 'network') {
-                micOK = false; toast('Microphone not available – please type your answer');
+                micOK = false; toast(t('voice.toast.nomic'));
                 var i = ctrls.querySelector('input'); if (i) i.focus();
               }
             };
@@ -1063,78 +1104,79 @@
               if (finalText.trim()) answer(finalText.trim());
             };
             rec.start();
-          } catch (e) { listening = false; micState(); toast('Voice input is not available – please type'); }
+          } catch (e) { listening = false; micState(); toast(t('voice.toast.unavailable')); }
         }
 
-        /* ----- answer parsing ----- */
-        var NUM = { one: 1, a: 1, single: 1, two: 2, couple: 2, three: 3, four: 4, five: 5, six: 6, seven: 7 };
-        function parseVehicles(t) {
-          var m = t.match(/\d+/), n = m ? +m[0] : 0;
-          if (!n) { t.toLowerCase().split(/\W+/).some(function (w) { if (NUM[w]) { n = NUM[w]; return true; } }); }
+        /* ----- answer parsing (the word lists live in the language file) ----- */
+        function parseVehicles(txt) {
+          var m = txt.match(/\d+/), n = m ? +m[0] : 0;
+          if (!n) { var nums = t('voice.numbers'); txt.toLowerCase().split(/[^\p{L}\p{N}]+/u).some(function (w) { if (nums[w]) { n = nums[w]; return true; } }); }
           if (!n) return null; return n >= 5 ? '5 or more' : String(n);
         }
-        function parseDamage(t) {
-          t = t.toLowerCase();
-          var exact = Object.keys(DAMAGE_ANGLES).filter(function (k) { return k.toLowerCase() === t; })[0]; if (exact) return exact;
-          var f = /front|bonnet|hood/.test(t), r = /rear|back|boot|trunk/.test(t), l = /\bleft\b/.test(t), rt = /\bright\b/.test(t), s = /side|door/.test(t);
-          if (r && s && !/corner/.test(t)) return 'Rear and side damage'; if (f && s && !/corner/.test(t)) return 'Front and side damage';
+        function parseDamage(txt) {
+          txt = txt.trim().toLowerCase();
+          var exact = Object.keys(DAMAGE_ANGLES).filter(function (k) { return k.toLowerCase() === txt || dmg(k).toLowerCase() === txt; })[0]; if (exact) return exact;
+          var f = rx('voice.re.front').test(txt), r = rx('voice.re.rear').test(txt), l = rx('voice.re.left').test(txt), rt = rx('voice.re.right').test(txt),
+              s = rx('voice.re.side').test(txt), cr = rx('voice.re.corner').test(txt);
+          if (r && s && !cr) return 'Rear and side damage'; if (f && s && !cr) return 'Front and side damage';
           if (f && l) return 'Front left damage'; if (f && rt) return 'Front right damage';
           if (r && l) return 'Rear left damage'; if (r && rt) return 'Rear right damage';
           if (f && s) return 'Front and side damage'; if (r && s) return 'Rear and side damage';
           if (f) return 'Front damage'; if (r) return 'Rear damage';
           if (l) return 'Left side damage'; if (rt) return 'Right side damage'; if (s) return 'Right side damage';
-          if (/other|everywhere|all over|several|multiple/.test(t)) return 'Other damage';
+          if (rx('voice.re.other').test(txt)) return 'Other damage';
           return null;
         }
-        function yesNo(t) {
-          t = t.toLowerCase();
-          if (/\b(no|nope|nobody|none|nothing|negative|nah)\b/.test(t)) return 'no';
-          if (/\b(yes|yeah|yep|yup|sure|there (was|were)|one|two|some|ok|okay|correct)\b/.test(t)) return 'yes';
+        function yesNo(txt) {
+          if (rx('voice.re.no', true).test(txt)) return 'no';
+          if (rx('voice.re.yes', true).test(txt)) return 'yes';
           return null;
         }
+        function isSkip(txt) { return txt.trim().toLowerCase() === t('voice.chip.skip').toLowerCase() || rx('voice.re.skip').test(txt); }
 
         /* ----- the conversation ----- */
         var witness = null;
         var photoQueue = [], photoN = 0, photosTaken = 0;
+        var YN = [t('voice.chip.yes'), t('voice.chip.no')];
         var S = {
-          intro: { q: 'Let’s start. Please describe what happened in your own words.', hint: null,
-            handle: function (t) { d.text = t; save(); return say('Thank you, I’ve noted that down.').then(function () { return go('vehicles'); }); } },
-          vehicles: { q: 'How many other vehicles were involved?', chips: ['1', '2', '3', '4', '5 or more'],
-            handle: function (t) {
-              var v = parseVehicles(t);
-              if (!v) return say('Sorry, I didn’t catch the number. How many other vehicles were involved?').then(function () { return go('vehicles', true); });
-              d.vehicles = v; save(); return say(v === '1' ? 'One other vehicle – got it.' : v + ' other vehicles – got it.').then(function () { return go('damage'); });
+          intro: { q: t('voice.q.intro'), hint: null,
+            handle: function (txt) { d.text = txt; save(); return say(t('voice.ack.intro')).then(function () { return go('vehicles'); }); } },
+          vehicles: { q: t('voice.q.vehicles'), chips: ['1', '2', '3', '4', t('details.vehicles5')],
+            handle: function (txt) {
+              var v = parseVehicles(txt);
+              if (!v) return say(t('voice.retry.vehicles')).then(function () { return go('vehicles', true); });
+              d.vehicles = v; save(); return say(v === '1' ? t('voice.ack.vehicles.one') : t('voice.ack.vehicles.many', { n: v === '5 or more' ? '5+' : v })).then(function () { return go('damage'); });
             } },
-          damage: { q: 'Where is your own vehicle damaged?', chips: Object.keys(DAMAGE_ANGLES),
-            handle: function (t) {
-              var v = parseDamage(t);
-              if (!v) return say('Sorry, I’m not sure which part that is. You can say for example “rear left” or choose from the options.').then(function () { return go('damage', true); });
-              setDamage(d, v); save(); return say(v + ' – noted.').then(function () { return go('witnesses'); });
+          damage: { q: t('voice.q.damage'), chips: Object.keys(DAMAGE_ANGLES).map(dmg),
+            handle: function (txt) {
+              var v = parseDamage(txt);
+              if (!v) return say(t('voice.retry.damage')).then(function () { return go('damage', true); });
+              setDamage(d, v); save(); return say(t('voice.ack.damage', { damage: dmg(v) })).then(function () { return go('witnesses'); });
             } },
-          witnesses: { q: 'Were there any witnesses?', chips: ['Yes', 'No'],
-            handle: function (t) {
-              var yn = yesNo(t);
-              if (!yn) return say('Sorry, was there any witness – yes or no?').then(function () { return go('witnesses', true); });
-              if (yn === 'no') return say('No problem.').then(function () { return startPhotos(); });
+          witnesses: { q: t('voice.q.witnesses'), chips: YN,
+            handle: function (txt) {
+              var yn = yesNo(txt);
+              if (!yn) return say(t('voice.retry.witnesses')).then(function () { return go('witnesses', true); });
+              if (yn === 'no') return say(t('voice.ack.nowitness')).then(function () { return startPhotos(); });
               witness = { name: '', contact: '' }; return go('wname');
             } },
-          wname: { q: 'What is the witness’s name?',
-            handle: function (t) { witness.name = t.replace(/^(it'?s|his name is|her name is|name is|they are|that'?s)\s+/i, ''); return go('wcontact'); } },
-          wcontact: { q: 'And a phone number or email to reach them?',
-            handle: function (t) {
-              witness.contact = t; d.witnesses.push(witness); save();
-              return say('Saved ' + witness.name + ' as a witness.').then(function () { return go('wmore'); });
+          wname: { q: t('voice.q.wname'),
+            handle: function (txt) { witness.name = txt.replace(new RegExp('^(' + t('voice.re.namePrefix') + ')\\s+', 'iu'), ''); return go('wcontact'); } },
+          wcontact: { q: t('voice.q.wcontact'),
+            handle: function (txt) {
+              witness.contact = txt; d.witnesses.push(witness); save();
+              return say(t('voice.ack.wsaved', { name: witness.name })).then(function () { return go('wmore'); });
             } },
-          wmore: { q: 'Was there another witness?', chips: ['Yes', 'No'],
-            handle: function (t) {
-              var yn = yesNo(t);
-              if (!yn) return say('Sorry, is there another witness – yes or no?').then(function () { return go('wmore', true); });
+          wmore: { q: t('voice.q.wmore'), chips: YN,
+            handle: function (txt) {
+              var yn = yesNo(txt);
+              if (!yn) return say(t('voice.retry.wmore')).then(function () { return go('wmore', true); });
               if (yn === 'no') return startPhotos();
               witness = { name: '', contact: '' }; return go('wname');
             } },
-          photo: { chips: ['Take photo', 'Skip'],
-            handle: function (t) {
-              if (/skip|later|no photo|can'?t|cannot/i.test(t)) { userSays('Skip'); return nextPhoto(); }
+          photo: { chips: [t('voice.chip.take'), t('voice.chip.skip')],
+            handle: function (txt) {
+              if (isSkip(txt)) { userSays(t('voice.chip.skip')); return nextPhoto(); }
               return takePhoto();
             } }
         };
@@ -1146,35 +1188,35 @@
           if (!expecting.q) return Promise.resolve();
           return say(expecting.q).then(function () { if (alive && micOK && expecting && expecting.key === key && !listening) listen(); });
         }
-        function answer(t) {
+        function answer(txt) {
           if (!expecting || busy || !alive) return;
           var st = expecting; busy = true; chips(null); expecting = null;
-          if (st.key !== 'photo' || !/^(take photo)$/i.test(t)) { if (st.key !== 'photo' || !/skip/i.test(t)) userSays(t); }
-          else userSays('Take photo');
-          st.handle(t);
+          if (st.key === 'photo' && txt.trim().toLowerCase() === t('voice.chip.take').toLowerCase()) userSays(t('voice.chip.take'));
+          else if (!(st.key === 'photo' && isSkip(txt))) userSays(txt);
+          st.handle(txt);
         }
 
         /* photos: one request per angle that belongs to the chosen damage type */
         function startPhotos() {
           photoQueue = damageAngles(d); photoN = 0; photosTaken = 0;
-          var list = photoQueue.map(function (a) { return ANGLES[a].replace('Vehicle ', '').replace(/ side$/, ' side'); }).join(', ');
-          return say('Thanks. Now I need ' + (photoQueue.length === 1 ? 'one photo' : photoQueue.length + ' photos') + ' of the damage – ' + list + '.').then(nextPhoto);
+          var list = photoQueue.map(function (a) { return t('angle.short.' + a); }).join(', ');
+          return say(photoQueue.length === 1 ? t('voice.photos.one', { list: list }) : t('voice.photos.many', { n: photoQueue.length, list: list })).then(nextPhoto);
         }
         function nextPhoto() {
           if (photoN >= photoQueue.length) return finish();
           var a = photoQueue[photoN];
-          var card = '<div class="vc-ph"><img src="assets/illustrations/' + a + '.svg" alt=""><span>' + ANGLES[a] + '</span></div>';
-          return say('Please take a photo of the ' + ANGLES[a].toLowerCase().replace('vehicle ', '') + ' of your vehicle.', card).then(function () { return go('photo', true); });
+          var card = '<div class="vc-ph"><img src="assets/illustrations/' + a + '.svg" alt=""><span>' + angleName(a) + '</span></div>';
+          return say(t('voice.photos.ask', { angle: t('angle.short.' + a) }), card).then(function () { return go('photo', true); });
         }
         function takePhoto() {
           var a = photoQueue[photoN]; busy = true;
-          openCamera({ title: ANGLES[a], hint: 'Take a photo of the damage', shape: 'vehicle', label: ANGLES[a],
+          openCamera({ title: angleName(a), hint: t('cam.hint.vehicle'), shape: 'vehicle', label: angleName(a),
             src: DEMO_PHOTOS[photoN % DEMO_PHOTOS.length],
             onDone: function (url) {
               if (!alive) return;
               photoUrls[a] = url; photosTaken++;
               add('me img', '<img alt="" src="' + url + '">');
-              photoN++; setTimeout(function () { if (alive) say(photoN < photoQueue.length ? 'Got it, thank you.' : 'Perfect, thank you.').then(nextPhoto); }, 300);
+              photoN++; setTimeout(function () { if (alive) say(photoN < photoQueue.length ? t('voice.ack.photo') : t('voice.ack.photoLast')).then(nextPhoto); }, 300);
             } });
           // if the camera is closed without a picture, ask again
           var chk = setInterval(function () {
@@ -1185,33 +1227,33 @@
 
         function finish() {
           chips(null); expecting = null;
-          var est = photosTaken ? 'Based on your photos, we estimate the damage at 160 000 – 190 000 CZK. If there are additional damages, the total may exceed the legal threshold – in that case, you will be required to call the police.' : '';
+          var est = photosTaken ? t('photos.estimate') : '';
           var p = Promise.resolve();
           if (est) p = say(est);
           return p.then(function () {
-            var w = d.witnesses.length ? d.witnesses.map(function (x) { return esc(x.name) + ' (' + esc(x.contact) + ')'; }).join(', ') : 'None';
-            var sum = '<div class="vc-sum"><div><small>Description</small><span>' + esc(d.text) + '</span></div>' +
-              '<div><small>Other vehicles</small><span>' + esc(d.vehicles) + '</span></div>' +
-              '<div><small>Type of damage</small><span>' + esc(d.damage) + '</span></div>' +
-              '<div><small>Witnesses</small><span>' + w + '</span></div>' +
-              '<div><small>Photos</small><span>' + photosTaken + ' of ' + photoQueue.length + '</span></div></div>';
-            return say('That’s everything I need for this part. Here is a summary:', sum);
+            var w = d.witnesses.length ? d.witnesses.map(function (x) { return esc(x.name) + ' (' + esc(x.contact) + ')'; }).join(', ') : t('voice.sum.none');
+            var sum = '<div class="vc-sum"><div><small>' + t('voice.sum.description') + '</small><span>' + esc(d.text) + '</span></div>' +
+              '<div><small>' + t('voice.sum.vehicles') + '</small><span>' + esc(vehLabel(d.vehicles)) + '</span></div>' +
+              '<div><small>' + t('voice.sum.damage') + '</small><span>' + esc(dmg(d.damage)) + '</span></div>' +
+              '<div><small>' + t('voice.sum.witnesses') + '</small><span>' + w + '</span></div>' +
+              '<div><small>' + t('voice.sum.photos') + '</small><span>' + t('voice.sum.photosOf', { a: photosTaken, b: photoQueue.length }) + '</span></div></div>';
+            return say(t('voice.sum.intro'), sum);
           }).then(function () {
-            return say('You can now continue with the accident sketch.');
+            return say(t('voice.sum.next'));
           }).then(function () {
             if (!alive) return;
-            ctrls.innerHTML = '<div class="vc-end"><button class="btn2" id="rs">Restart chat</button><a class="btn on" href="#sketch">Continue</a></div>';
+            ctrls.innerHTML = '<div class="vc-end"><button class="btn2" id="rs">' + t('voice.restart') + '</button><a class="btn on" href="#sketch">' + t('voice.continue') + '</a></div>';
             ctrls.querySelector('#rs').addEventListener('click', function () { render(); });
             down();
           });
         }
 
         /* start: the first tap is also the user gesture that allows voice replies and the microphone */
-        ctrls.innerHTML = '<button class="btn on" id="start">Start voice chat</button>';
+        ctrls.innerHTML = '<button class="btn on" id="start">' + t('voice.start') + '</button>';
         ctrls.querySelector('#start').addEventListener('click', function () {
           hero.hidden = true; d.witnesses = []; d.text = ''; save(); drawChat();
           try { if (synth) { synth.cancel(); var u = new SpeechSynthesisUtterance(' '); u.volume = 0; synth.speak(u); } } catch (e) {}
-          say('Hi, I’m your accident assistant. I’ll ask a few quick questions.').then(function () { return go('intro'); });
+          say(t('voice.hello')).then(function () { return go('intro'); });
         });
       }
     };
@@ -1220,16 +1262,17 @@
   var ROUTES = [
     { id: 'start', label: 'Is everyone all right?', figma: '43:7044', build: startScreen, noBack: true },
     { id: 'safety', label: 'Roadside safety', figma: '43:6880', build: function () {
-      return checklist('safety', 'Roadside safety', 'Make sure you follow the safety suggestions:', [
-        ['Hazard lights active', 'Turn on your hazard lights to warn approaching drivers that your vehicle has stopped.', 'hazard-lights'],
-        ['High-visibility vest worn', 'Put on your vest before leaving the car so other drivers can see you clearly.', 'vest'],
-        ['Warning triangle placed', 'Place the triangle well behind your vehicle, about 50 meters on regular roads and 100 meters on highways, to give traffic time to slow down.', 'triangle']
+      return checklist('safety', t('safety.title'), t('safety.intro'), [
+        [t('safety.hazard.title'), t('safety.hazard.text'), 'hazard-lights'],
+        [t('safety.vest.title'), t('safety.vest.text'), 'vest'],
+        [t('safety.triangle.title'), t('safety.triangle.text'), 'triangle']
       ], 'police-check'); } },
     { id: 'police-check', label: 'Police involvement', figma: '79:3219', build: function () {
-      return checklist('police', 'Police involvement', 'Check that the accident meets the criteria for not involving the police:', [
-        ['Damage is less than 200 000 CZK', 'Each of the affected vehicles is only lightly damaged, with damage cost estimate below 200 000 CZK', 'damage-vehicle'],
-        ['No damage to a 3rd party', 'There is no damage to a third party property - like damaged fence, parked cars or a building.', 'third-party']
-      ], 'location', 'If the damage on either vehicle is above 200 000 CZK, or a third party was damaged, you should call the police.'); } },
+      return checklist('police', t('police.title'), t('police.intro'), [
+        [t('police.damage.title'), t('police.damage.text'), 'damage-vehicle'],
+        [t('police.third.title'), t('police.third.text'), 'third-party'],
+        [t('police.agree.title'), t('police.agree.text'), 'drivers-agree']
+      ], 'location', t('police.warn')); } },
     { id: 'location', label: 'Accident location', figma: '43:6689', build: locationScreen },
     { id: 'details', label: 'Accident details (form)', figma: '13:479', build: detailsScreen },
     { id: 'photos', label: 'Photos of damage', figma: '79:3450', build: photosScreen },
@@ -1274,6 +1317,31 @@
   }
   function nextId(r) { return flowAt(r, 1); }
 
+  /* ---------- Language switcher (top right of the header) ---------- */
+  function langSwitcher() {
+    var cur = LANGS.filter(function (l) { return l[0] === lang; })[0] || LANGS[0];
+    return '<div class="lang"><button class="lang-btn" type="button" aria-haspopup="listbox" aria-expanded="false" aria-label="' + t('lang.label') + '">' + cur[1] +
+      '<svg width="12" height="12" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7.5l6 6 6-6"/></svg></button>' +
+      '<ul class="lang-menu" role="listbox" hidden>' + LANGS.map(function (l) {
+        return '<li><button type="button" role="option" data-lang="' + l[0] + '" aria-selected="' + (l[0] === lang) + '"><b>' + l[1] + '</b><span>' + l[2] + '</span></button></li>';
+      }).join('') + '</ul></div>';
+  }
+  function closeLang() {
+    var m = app.querySelector('.lang-menu'), b = app.querySelector('.lang-btn');
+    if (m) m.hidden = true; if (b) b.setAttribute('aria-expanded', 'false');
+  }
+  function bindLang() {
+    var box = app.querySelector('.lang'); if (!box) return;
+    var btn = box.querySelector('.lang-btn'), menu = box.querySelector('.lang-menu');
+    btn.addEventListener('click', function (e) {
+      e.stopPropagation(); var open = menu.hidden; closeLang(); menu.hidden = !open; btn.setAttribute('aria-expanded', open);
+    });
+    menu.addEventListener('click', function (e) {
+      var b = e.target.closest('[data-lang]'); if (!b) return; closeLang(); setLang(b.dataset.lang);
+    });
+  }
+  document.addEventListener('click', closeLang);
+
   /* ---------- Rendering ---------- */
   function render() {
     token++;
@@ -1292,16 +1360,16 @@
     var step = s.bar.step, segs = '';
     var STEP_ROUTE = ['location', 'details', 'photos', 'sketch', 'documents', 'second-party', 'sign', 'summary'];
     for (var i = 1; i <= TOTAL_STEPS; i++) {
-      segs += i < step ? '<a class="on done" href="#' + STEP_ROUTE[i - 1] + '" aria-label="Go to step ' + i + '"></a>'
+      segs += i < step ? '<a class="on done" href="#' + STEP_ROUTE[i - 1] + '" aria-label="' + t('common.gotoStep', { n: i }) + '"></a>'
         : '<i' + (i === step ? ' class="on"' : '') + '></i>';
     }
     app.innerHTML =
       '<header class="bar">' +
-        (backTarget ? '<button class="back" aria-label="Back">' + I.left + '</button>' : '<span></span>') +
-        '<div class="ttl">' + (step ? '<small>Step ' + step + '/' + TOTAL_STEPS + '</small>' : '') + '<h1>' + s.bar.title + '</h1></div><span></span></header>' +
-      (step ? '<nav class="steps" aria-label="Progress">' + segs + '</nav>' : '') +
+        (backTarget ? '<button class="back" aria-label="' + t('common.back') + '">' + I.left + '</button>' : '<span></span>') +
+        '<div class="ttl">' + (step ? '<small>' + t('common.step', { n: step, total: TOTAL_STEPS }) + '</small>' : '') + '<h1>' + s.bar.title + '</h1></div>' + langSwitcher() + '</header>' +
+      (step ? '<nav class="steps" aria-label="' + t('common.progress') + '">' + segs + '</nav>' : '') +
       '<main class="content' + (s.fill ? ' fill' : '') + '">' + s.html + '</main>' +
-      (s.next ? '<div class="controls"><button class="btn">' + (s.cta || 'Proceed') + '</button></div>' : '');
+      (s.next ? '<div class="controls"><button class="btn">' + (s.cta || t('common.proceed')) + '</button></div>' : '');
 
     if (backTarget) app.querySelector('.back').addEventListener('click', function () { location.hash = backTarget; });
     var btn = app.querySelector('.controls .btn');
@@ -1314,14 +1382,21 @@
       catch (err) {
         console.error(err);
         var mp = app.querySelector('.map');
-        if (mp) mp.innerHTML = '<p style="padding:16px;color:#c8c8c8;font-size:14px">The map could not be loaded. Make sure the whole folder (including "vendor") is uploaded next to index.html.</p>';
+        if (mp) mp.innerHTML = '<p style="padding:16px;color:#c8c8c8;font-size:14px">' + t('common.mapError') + '</p>';
       }
     }
     app.scrollTop = 0;
-    document.title = s.bar.title + ' – prototype';
+    document.title = s.bar.title + ' – ' + t('app.suffix');
+    bindLang();
   }
 
-  window.addEventListener('hashchange', render);
-  initGeolocation();
-  render();
+  /* Start: load the language file first, then show the first screen */
+  loadLang(pickLang()).then(function () {
+    window.addEventListener('hashchange', render);
+    initGeolocation();
+    render();
+  }, function () {
+    app.innerHTML = '<div style="padding:28px 20px;color:#fff;font:16px/1.5 sans-serif"><b>Could not load the language files (lang/*.json).</b><br>' +
+      'Open the prototype from a web server (for example GitHub Pages, or "python3 -m http.server" in this folder) rather than by double-clicking index.html.</div>';
+  });
 })();
