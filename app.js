@@ -483,6 +483,7 @@
   }
 
   /* opts: { title, hint, shape: 'vehicle'|'document', src, label, onDone(imageUrl) } */
+  var MOTION_X = 1, MOTION_Y = 1;   // direction of the fake camera's movement; set to -1 to reverse an axis
   var USE_REAL_CAMERA = false;   // false = show the pre-made picture instead of the device camera
 
   function openCamera(opts) {
@@ -510,8 +511,10 @@
       function clamp(v) { return Math.max(-1, Math.min(1, v)); }
       onOri = function (e) {
         if (e.gamma == null || e.beta == null) return;
-        gotSensor = true; if (!base) base = { g: e.gamma, b: e.beta };
-        tilt.x = clamp((e.gamma - base.g) / 20); tilt.y = clamp((e.beta - base.b) / 20);
+        gotSensor = true; if (!base) base = { g: e.gamma, b: e.beta, a: e.alpha };
+        /* left/right = turning the phone (compass heading, alpha) where available, else rolling it (gamma) */
+        var dx = (e.alpha != null && base.a != null) ? ((e.alpha - base.a + 540) % 360) - 180 : (e.gamma - base.g);
+        tilt.x = clamp(dx / 25); tilt.y = clamp((e.beta - base.b) / 20);
       };
       var DOE = window.DeviceOrientationEvent;
       if (DOE) {
@@ -522,7 +525,7 @@
       (function loop() {
         if (closed) return;
         var t = (Date.now() - t0) / 1000, amp = gotSensor ? 1.2 : 4;      // idle drift in %, larger without a sensor
-        var tx = -tilt.x * 11 + Math.sin(t * 0.9) * amp, ty = -tilt.y * 11 + Math.cos(t * 0.7) * amp * 0.8;
+        var tx = MOTION_X * tilt.x * 11 + Math.sin(t * 0.9) * amp, ty = MOTION_Y * tilt.y * 11 + Math.cos(t * 0.7) * amp * 0.8;
         cur.x += (tx - cur.x) * 0.08; cur.y += (ty - cur.y) * 0.08;
         feed.style.transform = 'translate3d(' + cur.x.toFixed(2) + '%,' + cur.y.toFixed(2) + '%,0) scale(1.32)';
         raf = requestAnimationFrame(loop);
