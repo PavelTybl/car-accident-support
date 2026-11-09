@@ -901,10 +901,10 @@
         '<button class="svc" data-t="tow"><span class="simg">' + svcImg('tow', TOW_IMG) + '</span><span class="stx"><b>' + t('summary.tow.title') + '</b><span>' + t('summary.tow.text') + '</span></span>' + I.right + '</button>',
       init: function (root) {
         function endBar() {
-          if (root.querySelector('.controls')) return;
-          var c = document.createElement('div'); c.className = 'controls two';
+          if (root.querySelector('.restart')) return;
+          var c = document.createElement('div'); c.className = 'restart';
           c.innerHTML = '<button class="btn2" data-end="restart">' + t('summary.restart') + '</button>';
-          root.appendChild(c);
+          root.querySelector('.content').appendChild(c);
           root.querySelector('[data-end="restart"]').addEventListener('click', function () {
             try { sessionStorage.removeItem('aw'); } catch (e) {}
             location.hash = '#start'; location.reload();

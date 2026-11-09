@@ -335,3 +335,6 @@ body{display:flex}
 .lang-menu button[aria-selected=true]{background:#2a2a2c}
 .lang-menu button[aria-selected=true] b{color:var(--green)}
 .lang-menu button:hover,.lang-menu button:focus-visible{background:#2a2a2c}
+
+/* Restart button: last item of the scrollable content */
+.restart{margin-top:28px;padding-bottom:calc(48px + env(safe-area-inset-bottom,0px))}
