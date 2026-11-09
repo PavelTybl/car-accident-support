@@ -16,14 +16,14 @@ body{display:flex}
 .bar .back{background:none;border:0;color:var(--text);width:48px;height:32px;display:flex;align-items:center;cursor:pointer;padding:0}
 .content{flex:1 0 auto;padding:24px var(--gutter)}
 .content>h2{font-size:20px;font-weight:700;line-height:24px;margin-bottom:12px}
-.intro{font-size:16px;line-height:22px;color:var(--muted);margin-bottom:20px}
+.intro{font-size:15px;line-height:21px;color:var(--muted);margin-bottom:20px}
 .stack{display:flex;flex-direction:column;gap:12px}
 .opt{display:flex;align-items:center;gap:16px;width:100%;text-align:left;font:inherit;color:inherit;
   background:var(--card);border:1px solid transparent;border-radius:var(--radius);padding:16px;cursor:pointer;text-decoration:none}
 .opt .ico{flex:none;width:32px;height:32px}
 .opt .txt{flex:1}
-.opt b{display:block;font-size:20px;line-height:24px;font-weight:700}
-.opt span{display:block;font-size:16px;line-height:22px;color:var(--muted)}
+.opt b{display:block;font-size:17px;line-height:21px;font-weight:700}
+.opt span{display:block;font-size:15px;line-height:21px;color:var(--muted)}
 .opt .go{flex:none}
 .opt.checked{border-color:var(--green);background:var(--green-bg)}
 .opt.danger{border-color:var(--red);background:var(--red-bg)}
@@ -51,7 +51,7 @@ body{display:flex}
 /* Cards, secondary buttons */
 .card{background:var(--card);border-radius:var(--radius);padding:24px}
 .card h3{font-size:16px;line-height:22px;font-weight:700;text-align:center;margin-bottom:16px}
-.addr{text-align:center;color:#9a9a9a;font-size:16px;line-height:22px;margin:16px 0 24px}
+.addr{text-align:center;color:#9a9a9a;font-size:15px;line-height:21px;margin:16px 0 24px}
 .btn2{display:block;width:100%;height:44px;border-radius:22px;border:1px solid #3a3a3c;background:#2a2a2c;color:#fff;font:inherit;font-weight:700;font-size:16px;cursor:pointer}
 .field{width:100%;height:48px;border-radius:var(--radius);border:1px solid #3a3a3c;background:#111;color:#fff;font:inherit;font-size:16px;padding:0 14px;margin-bottom:12px}
 .err{color:var(--red);font-size:14px;min-height:20px;margin-bottom:8px;text-align:center}
@@ -118,7 +118,7 @@ body{display:flex}
 .btn2.add{display:flex;align-items:center;justify-content:center;gap:8px;width:auto;padding:0 32px;margin:12px auto}
 .note{display:flex;gap:12px;align-items:flex-start;margin-top:16px;border:1px solid #ffd60a;background:#2a2a2c;border-radius:var(--radius);padding:16px}
 .note svg{flex:none;margin-top:1px}
-.note p{font-size:16px;line-height:24px}
+.note p{font-size:15px;line-height:21px}
 
 /* Driver information */
 .dcard{padding:16px}
@@ -132,7 +132,7 @@ body{display:flex}
 @keyframes sp{to{transform:rotate(360deg)}}
 .dl-list{margin-top:6px}
 .li{display:flex;align-items:center;gap:8px;padding:12px 0 11px;border-bottom:1px solid rgba(243,243,243,.12);min-height:48px}
-.li .lt{flex:1;font-size:16px;line-height:24px;color:#fff;letter-spacing:.02em}
+.li .lt{flex:1;font-size:15px;line-height:21px;color:#fff;letter-spacing:.02em}
 .li .lv{font-size:14px;line-height:20px;text-align:right;white-space:pre-line;color:#fff}
 .li .chv{flex:none}
 .acts{display:flex;justify-content:space-around;padding-top:12px}
@@ -146,15 +146,15 @@ body{display:flex}
 /* Share form */
 .opt .oi{flex:none;width:24px;height:24px}
 .center{flex:1;display:flex;align-items:center;justify-content:center;text-align:center;padding-bottom:80px}
-.center p{max-width:240px;font-size:16px;line-height:24px;color:var(--muted)}
+.center p{max-width:240px;font-size:15px;line-height:21px;color:var(--muted)}
 
 /* Report ready, services, consent */
 .toast.fixed{position:fixed;bottom:24px;z-index:3000}
 .tile{background:#2b2b2d;border-radius:var(--radius);padding:16px}
-.tile .tp{font-size:16px;line-height:24px;color:var(--muted);margin:4px 0 16px}
+.tile .tp{font-size:15px;line-height:21px;color:var(--muted);margin:4px 0 16px}
 .sub{background:#1c1c1e;border-radius:var(--radius);padding:0 16px;margin-bottom:12px}
 .sr{display:flex;justify-content:space-between;align-items:center;gap:12px;min-height:48px;padding:12px 0;border-bottom:1px solid rgba(243,243,243,.12)}
-.sl{display:flex;align-items:center;gap:8px;font-size:16px;line-height:24px}
+.sl{display:flex;align-items:center;gap:8px;font-size:15px;line-height:21px}
 .sv{font-size:14px;line-height:20px;text-align:right}
 .dot{width:12px;height:12px;border-radius:50%;display:inline-block}
 .tb{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:16px}
@@ -164,13 +164,13 @@ body{display:flex}
 .svc{display:flex;align-items:center;gap:12px;width:100%;margin-bottom:12px;text-align:left;font:inherit;color:inherit;text-decoration:none;background:var(--card);border:0;border-radius:var(--radius);padding:16px;cursor:pointer}
 .svc .simg{flex:none;width:64px;height:64px}
 .svc .stx{flex:1}
-.svc .stx b{display:block;font-size:20px;line-height:24px}
-.svc .stx span{display:block;font-size:16px;line-height:22px;color:var(--muted)}
+.svc .stx b{display:block;font-size:17px;line-height:21px}
+.svc .stx span{display:block;font-size:15px;line-height:21px;color:var(--muted)}
 .intro.rec{margin-bottom:12px}
 .svt .sh{display:flex;justify-content:space-between;align-items:baseline}
-.svt .sh b{font-size:16px;line-height:24px}
-.svt .sh span{font-size:16px;color:#9a9a9a}
-.svt .sa{font-size:16px;line-height:22px;color:#9a9a9a;margin:10px 0 16px}
+.svt .sh b{font-size:17px;line-height:21px}
+.svt .sh span{font-size:15px;color:#9a9a9a;line-height:21px}
+.svt .sa{font-size:15px;line-height:21px;color:#9a9a9a;margin:10px 0 16px}
 .svt .sub{margin-bottom:16px}
 .svt .sr:last-child,.tile .sub .sr:last-child{border-bottom:0}
 .btn.bk{display:flex;align-items:center;justify-content:center;width:178px;margin:0 auto;text-decoration:none;color:#000}
@@ -213,7 +213,7 @@ body{display:flex}
 .modal .mi{display:flex;justify-content:center;margin-bottom:8px}
 .modal .mi svg{width:48px;height:48px}
 .modal h2{margin:8px 0;font-size:24px;line-height:28px}
-.modal p{margin:0 0 20px;font-size:16px;line-height:22px;color:var(--muted)}
+.modal p{margin:0 0 20px;font-size:15px;line-height:21px;color:var(--muted)}
 .controls.two{display:flex;flex-direction:row;gap:12px}
 .controls.two .btn2{flex:1;display:flex;align-items:center;justify-content:center;text-decoration:none;margin:0}
 
@@ -222,12 +222,12 @@ body{display:flex}
 .vc-hero{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:12px;padding:0 8px}
 .vc-hero[hidden]{display:none}
 .vc-hero h2{margin:8px 0 0;font-size:24px;line-height:28px}
-.vc-hero p{margin:0;font-size:16px;line-height:22px;color:var(--muted)}
+.vc-hero p{margin:0;font-size:15px;line-height:21px;color:var(--muted)}
 .vc-orb{width:96px;height:96px;border-radius:50%;background:#0e1f12;border:2px solid var(--green);color:var(--green);display:flex;align-items:center;justify-content:center;animation:vcpulse 2.4s ease-in-out infinite}
 .vc-orb svg{width:40px;height:40px}
 @keyframes vcpulse{0%,100%{box-shadow:0 0 0 0 rgba(48,209,88,.35)}50%{box-shadow:0 0 0 18px rgba(48,209,88,0)}}
 .vc-log{display:flex;flex-direction:column;gap:12px;padding-bottom:8px}
-.bub{max-width:86%;padding:12px 16px;border-radius:20px;font-size:16px;line-height:22px;overflow-wrap:anywhere;animation:bubin .2s ease-out}
+.bub{max-width:86%;padding:12px 16px;border-radius:20px;font-size:15px;line-height:21px;overflow-wrap:anywhere;animation:bubin .2s ease-out}
 @keyframes bubin{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
 .bub.bot{align-self:flex-start;background:var(--card);border-bottom-left-radius:6px}
 .bub.me{align-self:flex-end;background:var(--green);color:#000;font-weight:600;border-bottom-right-radius:6px}
@@ -298,7 +298,7 @@ body{display:flex}
 
 /* Screen 5: tap-the-damage vehicle drawing */
 .dmgmap{margin-top:16px;padding:16px;text-align:center}
-.dmgmap p{margin:0 0 16px;text-align:left;font-size:16px;line-height:22px;color:var(--muted)}
+.dmgmap p{margin:0 0 16px;text-align:left;font-size:15px;line-height:21px;color:var(--muted)}
 .dmgmap svg{display:block;width:100%;max-width:300px;height:auto;margin:0 auto;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
 .dmgmap svg [role=button]:focus-visible rect{stroke:#fff;stroke-width:1.5;stroke-dasharray:4 3}
 .dmgmap small{display:block;margin-top:12px;font-size:14px;line-height:20px;color:var(--green);font-weight:700}
