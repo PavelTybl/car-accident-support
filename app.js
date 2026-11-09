@@ -197,7 +197,7 @@
 
   function checklist(key, title, intro, items, next, warn) {
     return {
-      bar: { title: title, back: true }, next: next, gated: true,
+      bar: { title: title, back: true }, next: next, gated: true, inline: true,
       html:
         '<p class="intro">' + intro + '</p><div class="stack">' +
         items.map(function (it, i) {
@@ -1363,13 +1363,14 @@
       segs += i < step ? '<a class="on done" href="#' + STEP_ROUTE[i - 1] + '" aria-label="' + t('common.gotoStep', { n: i }) + '"></a>'
         : '<i' + (i === step ? ' class="on"' : '') + '></i>';
     }
+    var ctl = s.next ? '<div class="controls' + (s.inline ? ' inline' : '') + '"><button class="btn">' + (s.cta || t('common.proceed')) + '</button></div>' : '';
     app.innerHTML =
       '<header class="bar">' +
         (backTarget ? '<button class="back" aria-label="' + t('common.back') + '">' + I.left + '</button>' : '<span></span>') +
         '<div class="ttl">' + (step ? '<small>' + t('common.step', { n: step, total: TOTAL_STEPS }) + '</small>' : '') + '<h1>' + s.bar.title + '</h1></div>' + langSwitcher() + '</header>' +
       (step ? '<nav class="steps" aria-label="' + t('common.progress') + '">' + segs + '</nav>' : '') +
-      '<main class="content' + (s.fill ? ' fill' : '') + '">' + s.html + '</main>' +
-      (s.next ? '<div class="controls"><button class="btn">' + (s.cta || t('common.proceed')) + '</button></div>' : '');
+      '<main class="content' + (s.fill ? ' fill' : '') + '">' + s.html + (s.next && s.inline ? ctl : '') + '</main>' +
+      (s.next && !s.inline ? ctl : '');
 
     if (backTarget) app.querySelector('.back').addEventListener('click', function () { location.hash = backTarget; });
     var btn = app.querySelector('.controls .btn');
