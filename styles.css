@@ -342,3 +342,12 @@ body{display:flex}
 /* Checklist screens: button and warning sit below the tiles, inside the scrolling content */
 .controls.inline{position:static;background:none;padding:20px 0 calc(48px + env(safe-area-inset-bottom,0px))}
 .controls.inline .note{margin-top:0}
+
+/* Emergency call button (first screen): red outline */
+.btn.call{background:none;border:1.5px solid #FF4245;color:#fff;cursor:pointer}
+/* Info-only checklist tiles (no checkbox) */
+.opt.chk.info{cursor:default}
+/* Warning box with text-link actions */
+.note>div{flex:1;min-width:0}
+.nact{display:flex;flex-wrap:wrap;gap:8px 24px;margin-top:12px}
+.tlink{background:none;border:0;padding:4px 0;color:#fff;font:inherit;font-size:15px;font-weight:700;text-decoration:underline;cursor:pointer}

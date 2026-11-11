@@ -88,18 +88,19 @@
   }
 
   /* ---------- Maps (Leaflet + OpenStreetMap-based tiles; no API key needed) ---------- */
+  var SKETCH_ZOOM = 19.5;   // accident sketch map zoom (was 19)
   function makeMap(el, kind, lat, lng, zoom) {
     var m = L.map(el, { zoomControl: false, dragging: false, touchZoom: false, doubleClickZoom: false,
-      scrollWheelZoom: false, boxZoom: false, keyboard: false }).setView([lat, lng], zoom);
+      scrollWheelZoom: false, boxZoom: false, keyboard: false, zoomSnap: 0.5, maxZoom: 21 }).setView([lat, lng], zoom);
     m.attributionControl.setPrefix(false);
     if (kind === 'dark') {
       L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',
         { maxZoom: 19, className: 'dark-tiles', attribution: 'Tiles © Esri' }).addTo(m);
     } else {
       L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-        { maxZoom: 19, attribution: 'Tiles © Esri' }).addTo(m);
+        { maxZoom: 21, maxNativeZoom: 19, attribution: 'Tiles © Esri' }).addTo(m);
       L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}',
-        { maxZoom: 19 }).addTo(m);
+        { maxZoom: 21, maxNativeZoom: 19 }).addTo(m);
     }
     cleanup = function () { m.remove(); };
     setTimeout(function () { m.invalidateSize(); }, 0);
@@ -190,27 +191,32 @@
         '<div class="stack">' +
         '<div class="opt start"><div class="txt"><b>' + t('start.yes.title') + '</b><span>' + t('start.yes.text') + '</span></div>' +
         '<a class="btn on" href="#safety">' + t('start.yes.cta') + '</a></div>' +
-        '<a class="opt danger" href="tel:112">' + I.alert + '<div class="txt"><b>' + t('start.emergency.title') + '</b><span>' + t('start.emergency.text') + '</span></div>' + I.right + '</a>' +
+        '<div class="opt start"><div class="txt"><b>' + t('start.emergency.title') + '</b><span>' + t('start.emergency.text') + '</span></div>' +
+        '<a class="btn call" href="tel:112">' + t('start.emergency.cta') + '</a></div>' +
         '</div>'
     };
   }
 
-  function checklist(key, title, intro, items, next, warn) {
+  function checklist(key, title, intro, items, next, warn, info) {
     return {
-      bar: { title: title, back: true }, next: next, gated: true, inline: true,
+      bar: { title: title, back: true }, next: next, gated: !info, inline: true,
       html:
         '<p class="intro">' + intro + '</p><div class="stack">' +
         items.map(function (it, i) {
-          return '<button class="opt chk" role="checkbox" aria-checked="false">' +
-            I.empty + '<div class="txt">' + (it[2] ? '<img class="ci" alt="" src="assets/icons/' + it[2] + '.svg">' : '') + '<b>' + it[0] + '</b><span>' + it[1] + '</span></div></button>';
+          var inner = '<div class="txt">' + (it[2] ? '<img class="ci" alt="" src="assets/icons/' + it[2] + '.svg">' : '') + '<b>' + it[0] + '</b><span>' + it[1] + '</span></div>';
+          return info ? '<div class="opt chk info">' + inner + '</div>'
+            : '<button class="opt chk" role="checkbox" aria-checked="false">' + I.empty + inner + '</button>';
         }).join('') + '</div>',
       init: function (root, btn) {
+        if (info) return;
         var boxes = root.querySelectorAll('[role=checkbox]');
         var saved = state[key] || [];
         var note = null;
         if (warn) {
           note = document.createElement('div'); note.className = 'note'; note.setAttribute('role', 'status');
-          note.innerHTML = I.info + '<p>' + warn + '</p>';
+          note.innerHTML = I.info + '<div><p>' + warn + '</p><div class="nact"><a class="tlink" href="tel:112">' + t('police.call') + '</a>' +
+            '<button class="tlink" type="button">' + t('police.proceed') + '</button></div></div>';
+          note.querySelector('button.tlink').addEventListener('click', function () { location.hash = next; });
           btn.parentNode.insertBefore(note, btn);
         }
         function paint() {
@@ -224,7 +230,7 @@
           });
           btn.classList.toggle('on', all);
           btn.disabled = !all;
-          if (note) note.hidden = all;
+          if (note) { note.hidden = all; btn.hidden = !all; }
         }
         boxes.forEach(function (b, i) {
           b.addEventListener('click', function () { saved[i] = !saved[i]; state[key] = saved; save(); paint(); });
@@ -291,8 +297,8 @@
       init: function (root) {
         var loc = getLoc();
         var box = root.querySelector('#sk');
-        var sm = makeMap(root.querySelector('#skmap'), 'sat', loc.lat, loc.lng, 19);
-        onGeo(function () { sm.setView([loc.lat, loc.lng], 19, { animate: false }); });
+        var sm = makeMap(root.querySelector('#skmap'), 'sat', loc.lat, loc.lng, SKETCH_ZOOM);
+        onGeo(function () { sm.setView([loc.lat, loc.lng], SKETCH_ZOOM, { animate: false }); });
         var sk = state.sketch || {
           sel: 'A',
           A: { x: 0.66, y: 0.76, a: 35, van: 0, spd: 1 },
@@ -407,7 +413,7 @@
 
   function detailsScreen() {
     var d = state.details || (state.details = { text: '', vehicles: '1', damage: '', witnesses: [] });
-    var vehicles = ['1', '2', '3', '4', '5 or more'];
+    var vehicles = ['0', '1', '2', '3', '4', '5 or more'];
     function opts(list, cur) { return list.map(function (o) { return '<option value="' + o + '"' + (o === cur ? ' selected' : '') + '>' + vehLabel(o) + '</option>'; }).join(''); }
     return {
       bar: { title: t('details.title'), back: true, step: 2 }, next: 'photos', cta: t('common.next'),
@@ -1109,9 +1115,9 @@
 
         /* ----- answer parsing (the word lists live in the language file) ----- */
         function parseVehicles(txt) {
-          var m = txt.match(/\d+/), n = m ? +m[0] : 0;
-          if (!n) { var nums = t('voice.numbers'); txt.toLowerCase().split(/[^\p{L}\p{N}]+/u).some(function (w) { if (nums[w]) { n = nums[w]; return true; } }); }
-          if (!n) return null; return n >= 5 ? '5 or more' : String(n);
+          var m = txt.match(/\d+/), n = m ? +m[0] : null;
+          if (n == null) { var nums = t('voice.numbers'); txt.toLowerCase().split(/[^\p{L}\p{N}]+/u).some(function (w) { if (Object.prototype.hasOwnProperty.call(nums, w)) { n = nums[w]; return true; } }); }
+          if (n == null) return null; return n >= 5 ? '5 or more' : String(n);
         }
         function parseDamage(txt) {
           txt = txt.trim().toLowerCase();
@@ -1141,11 +1147,11 @@
         var S = {
           intro: { q: t('voice.q.intro'), hint: null,
             handle: function (txt) { d.text = txt; save(); return say(t('voice.ack.intro')).then(function () { return go('vehicles'); }); } },
-          vehicles: { q: t('voice.q.vehicles'), chips: ['1', '2', '3', '4', t('details.vehicles5')],
+          vehicles: { q: t('voice.q.vehicles'), chips: ['0', '1', '2', '3', '4', t('details.vehicles5')],
             handle: function (txt) {
               var v = parseVehicles(txt);
               if (!v) return say(t('voice.retry.vehicles')).then(function () { return go('vehicles', true); });
-              d.vehicles = v; save(); return say(v === '1' ? t('voice.ack.vehicles.one') : t('voice.ack.vehicles.many', { n: v === '5 or more' ? '5+' : v })).then(function () { return go('damage'); });
+              d.vehicles = v; save(); return say(v === '0' ? t('voice.ack.vehicles.zero') : v === '1' ? t('voice.ack.vehicles.one') : t('voice.ack.vehicles.many', { n: v === '5 or more' ? '5+' : v })).then(function () { return go('damage'); });
             } },
           damage: { q: t('voice.q.damage'), chips: Object.keys(DAMAGE_ANGLES).map(dmg),
             handle: function (txt) {
@@ -1266,7 +1272,7 @@
         [t('safety.hazard.title'), t('safety.hazard.text'), 'hazard-lights'],
         [t('safety.vest.title'), t('safety.vest.text'), 'vest'],
         [t('safety.triangle.title'), t('safety.triangle.text'), 'triangle']
-      ], 'police-check'); } },
+      ], 'police-check', null, true); } },
     { id: 'police-check', label: 'Police involvement', figma: '79:3219', build: function () {
       return checklist('police', t('police.title'), t('police.intro'), [
         [t('police.damage.title'), t('police.damage.text'), 'damage-vehicle'],
